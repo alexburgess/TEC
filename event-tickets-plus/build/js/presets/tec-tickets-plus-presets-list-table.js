@@ -1,1 +1,0 @@
-jQuery(document).on("click",".row-actions .delete a",(e=>{const t=wp.i18n.__("Are you sure you want to delete this Preset?","event-tickets-plus");confirm(t)||e.preventDefault()})),window.ticketsPlus=window.ticketsPlus||{},window.ticketsPlus.presets=window.ticketsPlus.presets||{},window.ticketsPlus.presets.tecTicketsPlusPresetsListTable={};
