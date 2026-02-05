@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <path
+    fill="currentColor"
+    fill-rule="evenodd"
+    d="M3.25 2.5h10.5c.966 0 1.75.784 1.75 1.75v10.5c0 .966-.784 1.75-1.75 1.75H3.25a1.75 1.75 0 0 1-1.75-1.75V4.25c0-.966.784-1.75 1.75-1.75zm2.8 0h1.6v3.05h-1.6V2.5zm5.3 0h1.6v3.05h-1.6V2.5zM3.1 6.9h10.8v1.15H3.1V6.9z"
+    clip-rule="evenodd"
+  />
+  <path
+    fill="currentColor"
+    fill-rule="evenodd"
+    d="M6.25 5.5h10.5c.966 0 1.75.784 1.75 1.75v10.5c0 .966-.784 1.75-1.75 1.75H6.25a1.75 1.75 0 0 1-1.75-1.75V7.25c0-.966.784-1.75 1.75-1.75zM9.05 5.5h1.6v3.05h-1.6V5.5zm5.3 0h1.6v3.05h-1.6V5.5zM6.1 9.9h10.8v1.15H6.1V9.9zM7.45 12.1h2.2v2.2h-2.2v-2.2zm3.05 0h2.2v2.2h-2.2v-2.2zm-3.05 3.05h2.2v2.2h-2.2v-2.2z"
+    clip-rule="evenodd"
+  />
+</svg>
