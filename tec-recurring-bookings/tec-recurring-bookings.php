@@ -26,6 +26,8 @@ function tec_rb_enqueue_assets() {
         $css_ver
     );
 
+    wp_enqueue_script('jquery-ui-datepicker');
+
     if (function_exists('wp_enqueue_media')) {
         wp_enqueue_media();
     }
@@ -33,7 +35,7 @@ function tec_rb_enqueue_assets() {
     wp_enqueue_script(
         'tec-recurring-bookings',
         $base_url . 'assets/js/tec-recurring-bookings.js',
-        array(),
+        array('jquery', 'jquery-ui-datepicker'),
         $js_ver,
         true
     );
@@ -81,6 +83,35 @@ function tec_rb_get_presets() {
     return array();
 }
 
+function tec_rb_normalize_created_post_id($value) {
+    if (is_wp_error($value) || !$value) {
+        return 0;
+    }
+    if (is_numeric($value)) {
+        return absint($value);
+    }
+    if (is_object($value)) {
+        if ($value instanceof WP_Post && isset($value->ID)) {
+            return absint($value->ID);
+        }
+        if (isset($value->ID)) {
+            return absint($value->ID);
+        }
+        if (method_exists($value, 'get_id')) {
+            return absint($value->get_id());
+        }
+    }
+    if (is_array($value)) {
+        if (isset($value['ID'])) {
+            return absint($value['ID']);
+        }
+        if (isset($value['id'])) {
+            return absint($value['id']);
+        }
+    }
+    return 0;
+}
+
 function tec_rb_save_preset_handler() {
     check_ajax_referer('tec_rb_ajax', 'nonce');
     if (!current_user_can('manage_options')) {
@@ -115,6 +146,79 @@ function tec_rb_disable_admin_footer_on_page() {
     add_filter('admin_footer_text', '__return_empty_string', 1000);
     add_filter('update_footer', '__return_empty_string', 1000);
 }
+
+function tec_rb_should_guard_ian() {
+    if (!is_admin() || !function_exists('get_current_screen')) {
+        return false;
+    }
+    $screen = get_current_screen();
+    if (!$screen) {
+        return false;
+    }
+    if ($screen->post_type !== 'tribe_events') {
+        return false;
+    }
+    if (!in_array($screen->base, array('post', 'edit'), true)) {
+        return false;
+    }
+    return true;
+}
+
+function tec_rb_guard_ian_sidebar_markup() {
+    if (!tec_rb_should_guard_ian()) {
+        return;
+    }
+    ?>
+    <script>
+      (function () {
+        const ensureIanMarkup = () => {
+          if (document.querySelector('[data-tec-ian-trigger="notifications"]')) {
+            return;
+          }
+          if (!document.body) {
+            return;
+          }
+          const sidebar = document.createElement("div");
+          sidebar.className = "ian-sidebar is-hidden";
+          sidebar.dataset.tecIanTrigger = "sideIan";
+          sidebar.style.display = "none";
+          sidebar.innerHTML = `
+            <div class="ian-sidebar__title">
+              <div class="ian-sidebar__title--left">Notifications</div>
+              <div class="ian-sidebar__title--right">
+                <a href="#" data-tec-ian-trigger="readAllIan" class="is-hidden">Mark all as read</a>
+                <button type="button" data-tec-ian-trigger="closeIan" class="button-link">Close</button>
+              </div>
+            </div>
+            <div class="ian-sidebar__content" data-tec-ian-trigger="contentIan">
+              <div class="ian-sidebar__loader is-hidden" data-tec-ian-trigger="loaderIan"></div>
+              <div class="ian-sidebar__notifications is-hidden" data-tec-ian-trigger="notifications" data-consent="false"></div>
+              <div class="ian-sidebar__optin is-hidden" data-tec-ian-trigger="emptyIan"></div>
+              <div class="ian-sidebar__optin is-hidden" data-tec-ian-trigger="optinIan"></div>
+            </div>
+          `;
+          document.body.appendChild(sidebar);
+
+          if (!document.querySelector('[data-tec-ian-trigger="iconIan"]')) {
+            const icon = document.createElement("div");
+            icon.className = "ian-client";
+            icon.dataset.tecIanTrigger = "iconIan";
+            icon.style.display = "none";
+            document.body.appendChild(icon);
+          }
+        };
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", ensureIanMarkup);
+        } else {
+          ensureIanMarkup();
+        }
+      })();
+    </script>
+    <?php
+}
+
+add_action('admin_head', 'tec_rb_guard_ian_sidebar_markup');
 
 function tec_rb_render_form() {
     tec_rb_enqueue_assets();
@@ -536,7 +640,7 @@ function tec_rb_dry_run_handler() {
 
 add_action('wp_ajax_tec_rb_dry_run', 'tec_rb_dry_run_handler');
 
-function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt, $timezone, $shared_capacity = false) {
+function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt, $timezone, $shared_capacity = false, $shared_capacity_level = 0) {
     $name = sanitize_text_field($ticket['name'] ?? '');
     if ($name === '') {
         $name = 'Ticket';
@@ -600,17 +704,25 @@ function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt
             '_global_stock_mode' => $capacity >= 0 ? 'own' : 'unlimited',
         );
     } elseif ($provider === 'woo') {
-        $stock_value = $capacity >= 0 ? $capacity : '';
-        $stock_status = $capacity === 0 ? 'outofstock' : 'instock';
-        // For shared capacity (global stock), we still create tickets with their "own" stock; we
-        // switch them to global stock mode in a post-process step after all tickets are created.
-        $stock_mode = $capacity >= 0 ? 'own' : 'unlimited';
+        $use_shared_capacity = $shared_capacity && (int) $shared_capacity_level > 0;
+        $shared_capacity_level = (int) $shared_capacity_level;
+
+        // For shared capacity, tickets use the event shared pool; TEC stores them as "global" mode.
+        // We set each ticket capacity to the shared total (matching manual TEC behavior).
+        $effective_capacity = $use_shared_capacity ? $shared_capacity_level : $capacity;
+
+        $stock_value = $effective_capacity >= 0 ? $effective_capacity : '';
+        $stock_status = $effective_capacity === 0 ? 'outofstock' : 'instock';
+        $stock_mode = $effective_capacity >= 0 ? 'own' : 'unlimited';
+        if ($use_shared_capacity) {
+            $stock_mode = 'global';
+        }
         $args = array(
             'title' => $name,
             'status' => 'publish',
             'event' => $event_id,
             'price' => $price === '' ? 0 : $price,
-            'capacity' => $capacity >= 0 ? $capacity : -1,
+            'capacity' => $effective_capacity >= 0 ? $effective_capacity : -1,
             'stock' => $stock_value,
             'stock_mode' => $stock_mode,
             'show_description' => $show_description,
@@ -619,14 +731,14 @@ function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt
             '_tribe_wooticket_event' => $event_id,
             '_price' => $price === '' ? 0 : $price,
             '_regular_price' => $price === '' ? 0 : $price,
-            '_manage_stock' => $capacity >= 0 ? 'yes' : 'no',
+            '_manage_stock' => $effective_capacity >= 0 ? 'yes' : 'no',
             '_stock' => $stock_value,
             '_stock_status' => $stock_status,
             '_backorders' => 'no',
             '_sold_individually' => 'no',
             '_virtual' => 'yes',
             '_downloadable' => 'no',
-            '_tribe_ticket_capacity' => $capacity >= 0 ? $capacity : -1,
+            '_tribe_ticket_capacity' => $effective_capacity >= 0 ? $effective_capacity : -1,
             '_tribe_ticket_stock' => $stock_value,
             '_tribe_ticket_show_description' => $show_description ? 'yes' : 'no',
             '_global_stock_mode' => $stock_mode,
@@ -686,9 +798,10 @@ function tec_rb_enable_shared_capacity_for_event($event_id, $ticket_ids, $event_
     }
 
     // Mirror the state created by TEC when enabling global stock:
-    // - event capacity set to shared total
-    // - each ticket uses global stock mode
-    update_post_meta($event_id, '_tribe_ticket_capacity', (string) $event_capacity);
+    // - enable global stock
+    // - mark each ticket as shared ("global") so capacity/stock will be synced
+    $object_stock = new Tribe__Tickets__Global_Stock( $event_id );
+    $object_stock->enable( true );
 
     $modified_fields = get_post_meta($event_id, '_tribe_modified_fields', true);
     if (!is_array($modified_fields)) {
@@ -703,11 +816,67 @@ function tec_rb_enable_shared_capacity_for_event($event_id, $ticket_ids, $event_
     foreach ($ticket_ids as $ticket_id) {
         update_post_meta($ticket_id, Tribe__Tickets__Global_Stock::TICKET_STOCK_MODE, Tribe__Tickets__Global_Stock::GLOBAL_STOCK_MODE);
         delete_post_meta($ticket_id, Tribe__Tickets__Global_Stock::TICKET_STOCK_CAP);
+        clean_post_cache($ticket_id);
     }
+
+    // Setting the event capacity triggers TEC's `updated_postmeta` hook to sync shared capacity.
+    update_post_meta($event_id, '_tribe_ticket_capacity', (string) $event_capacity);
 
     $handler = tribe('tickets.handler');
     if ($handler && method_exists($handler, 'sync_shared_capacity')) {
         $handler->sync_shared_capacity($event_id, $event_capacity);
+    }
+}
+
+function tec_rb_set_ticket_waitlist($event_id, $mode) {
+    if (!$event_id) {
+        return;
+    }
+    if (!class_exists('\\TEC\\Tickets_Plus\\Waitlist\\Waitlists') || !class_exists('\\TEC\\Tickets_Plus\\Waitlist\\Waitlist')) {
+        return;
+    }
+    if (!function_exists('tribe')) {
+        return;
+    }
+
+    $mode = sanitize_text_field($mode);
+    $enabled = true;
+    $conditional = \TEC\Tickets_Plus\Waitlist\Waitlist::ALWAYS_CONDITIONAL;
+
+    switch ($mode) {
+        case 'presale_or_sold_out':
+            $conditional = \TEC\Tickets_Plus\Waitlist\Waitlist::ALWAYS_CONDITIONAL;
+            break;
+        case 'before_sale':
+            $conditional = \TEC\Tickets_Plus\Waitlist\Waitlist::BEFORE_SALE_CONDITIONAL;
+            break;
+        case 'sold_out':
+            $conditional = \TEC\Tickets_Plus\Waitlist\Waitlist::ON_SOLD_OUT_CONDITIONAL;
+            break;
+        default:
+            $enabled = false;
+            $conditional = \TEC\Tickets_Plus\Waitlist\Waitlist::ALWAYS_CONDITIONAL;
+            break;
+    }
+
+    $waitlists = tribe(\TEC\Tickets_Plus\Waitlist\Waitlists::class);
+    if (!$waitlists || !method_exists($waitlists, 'upsert_waitlist_for_post')) {
+        return;
+    }
+
+    $waitlists->upsert_waitlist_for_post(
+        (int) $event_id,
+        array(
+            'enabled' => $enabled,
+            'conditional' => $conditional,
+        ),
+        \TEC\Tickets_Plus\Waitlist\Waitlist::TICKET_TYPE
+    );
+
+    // Avoid leaving mismatched meta values; waitlists are stored in custom tables.
+    if (class_exists('\\TEC\\Tickets_Plus\\Waitlist\\Meta')) {
+        delete_post_meta($event_id, \TEC\Tickets_Plus\Waitlist\Meta::ENABLED_KEY);
+        delete_post_meta($event_id, \TEC\Tickets_Plus\Waitlist\Meta::CONDITIONAL_KEY);
     }
 }
 
@@ -814,6 +983,24 @@ function tec_rb_get_event_ticket_ids($event_id, $provider) {
         'no_found_rows' => true,
     ));
     return array_map('intval', $tickets);
+}
+
+function tec_rb_build_ticket_summaries($ticket_ids) {
+    if (empty($ticket_ids) || !is_array($ticket_ids)) {
+        return array();
+    }
+    $summaries = array();
+    foreach ($ticket_ids as $ticket_id) {
+        $ticket_id = (int) $ticket_id;
+        if ($ticket_id <= 0) {
+            continue;
+        }
+        $summaries[] = array(
+            'id' => $ticket_id,
+            'name' => get_the_title($ticket_id),
+        );
+    }
+    return $summaries;
 }
 
 function tec_rb_ticket_show_description($ticket_id) {
@@ -1088,6 +1275,7 @@ function tec_rb_create_events_tickets_handler() {
         : array();
     $shared_capacity = !empty($payload['sharedCapacity']) && count($ticket_types) > 1;
     $shared_capacity_total = isset($payload['sharedCapacityTotal']) ? (int) $payload['sharedCapacityTotal'] : 0;
+    $waitlist_mode = sanitize_text_field($payload['waitlistMode'] ?? 'none');
 
     if ($event_name === '' || $start_date === '' || $end_date === '') {
         wp_send_json_error(array('message' => 'Missing event name or date range.'));
@@ -1251,11 +1439,11 @@ function tec_rb_create_events_tickets_handler() {
         }
 
         $event_ids[] = $event_id;
+        $event_ticket_ids = array();
 
         if (!empty($ticket_types) && $provider !== '') {
             $event_start_dt = DateTime::createFromFormat('Y-m-d H:i:s', $instance['start_datetime'], $timezone);
             $created_for_event = 0;
-            $event_ticket_ids = array();
             $global_stock_level = $shared_capacity ? tec_rb_calculate_shared_capacity($ticket_types) : 0;
             if ($shared_capacity) {
                 if ($shared_capacity_total > 0 && $shared_capacity_total < $global_stock_level) {
@@ -1266,31 +1454,74 @@ function tec_rb_create_events_tickets_handler() {
                 }
             }
 
-            foreach ($ticket_types as $ticket) {
-                $args = tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt, $timezone, ($shared_capacity && $global_stock_level > 0));
-                $ticket_id = tribe_tickets($provider)->set_args($args)->create();
-                if (is_wp_error($ticket_id) || !$ticket_id) {
-                    $missing[] = array('startDateTime' => $instance['start_datetime']);
-                    continue;
+            // Capture ticket IDs before creation; some repositories return non-scalar values from `create()`.
+            // We'll query for the actual created ticket IDs after creation and use those everywhere (output, cache refresh, shared capacity).
+            $ticket_ids_before = tec_rb_get_event_ticket_ids($event_id, $provider);
+            $normalized_ticket_ids = array();
+
+            // Pre-enable shared capacity on the event before ticket creation so the provider can persist the mode.
+            if ($provider === 'woo' && $shared_capacity && $global_stock_level > 0) {
+                update_post_meta($event_id, '_tribe_ticket_use_global_stock', 1);
+                update_post_meta($event_id, '_tribe_ticket_global_stock_level', (string) $global_stock_level);
+                update_post_meta($event_id, '_tribe_ticket_capacity', (string) $global_stock_level);
+
+                $modified_fields = get_post_meta($event_id, '_tribe_modified_fields', true);
+                if (!is_array($modified_fields)) {
+                    $modified_fields = array();
                 }
-                if ($provider === 'woo') {
-                    tec_rb_finalize_woo_ticket($ticket_id, !empty($ticket['showDescription']));
-                }
-                $ticket_ids[] = $ticket_id;
-                $event_ticket_ids[] = $ticket_id;
-                $created_for_event++;
+                $now = current_time('timestamp');
+                $modified_fields['_tribe_ticket_capacity'] = $now;
+                $modified_fields['_tribe_ticket_use_global_stock'] = $now;
+                $modified_fields['_tribe_ticket_global_stock_level'] = $now;
+                update_post_meta($event_id, '_tribe_modified_fields', $modified_fields);
             }
 
-            if ($created_for_event === 0) {
-                $event_ticket_ids = tec_rb_get_event_ticket_ids($event_id, $provider);
-                $created_for_event = count($event_ticket_ids);
-                if ($created_for_event > 0 && $provider === 'woo') {
-                    foreach ($event_ticket_ids as $fallback_ticket_id) {
-                        tec_rb_finalize_woo_ticket($fallback_ticket_id, tec_rb_ticket_show_description($fallback_ticket_id));
-                    }
+            foreach ($ticket_types as $ticket) {
+                $args = tec_rb_build_ticket_args(
+                    $provider,
+                    $ticket,
+                    $event_id,
+                    $event_start_dt,
+                    $timezone,
+                    ($shared_capacity && $global_stock_level > 0),
+                    $global_stock_level
+                );
+                $created_ticket = tribe_tickets($provider)->set_args($args)->create();
+                $ticket_id = tec_rb_normalize_created_post_id($created_ticket);
+                if ($ticket_id) {
+                    $normalized_ticket_ids[] = $ticket_id;
+                }
+            }
+
+            $ticket_ids_after = tec_rb_get_event_ticket_ids($event_id, $provider);
+            $new_ticket_ids = array();
+            if (!empty($ticket_ids_after)) {
+                $new_ticket_ids = array_values(array_diff($ticket_ids_after, $ticket_ids_before));
+                if (empty($new_ticket_ids) && empty($ticket_ids_before)) {
+                    $new_ticket_ids = $ticket_ids_after;
+                }
+            }
+            if (empty($new_ticket_ids) && !empty($normalized_ticket_ids)) {
+                $new_ticket_ids = $normalized_ticket_ids;
+            }
+            $new_ticket_ids = array_values(array_unique(array_map('intval', $new_ticket_ids)));
+            $new_ticket_ids = array_values(array_filter($new_ticket_ids));
+            sort($new_ticket_ids);
+
+            $event_ticket_ids = $new_ticket_ids;
+            $event_ticket_summaries = tec_rb_build_ticket_summaries($event_ticket_ids);
+            $created_for_event = count($event_ticket_ids);
+
+            if ($created_for_event > 0 && $provider === 'woo') {
+                foreach ($event_ticket_ids as $created_ticket_id) {
+                    tec_rb_finalize_woo_ticket($created_ticket_id, tec_rb_ticket_show_description($created_ticket_id));
+                    tec_rb_normalize_ticket_sale_meta($created_ticket_id);
                 }
             }
             if ($created_for_event > 0) {
+                // Track all created ticket IDs so Delete Last Batch can remove them.
+                $ticket_ids = array_merge($ticket_ids, $event_ticket_ids);
+
                 tec_rb_mark_event_has_tickets($event_id, $provider);
                 tec_rb_refresh_event($event_id, $event_args);
                 tec_rb_force_publish_event($event_id);
@@ -1307,6 +1538,11 @@ function tec_rb_create_events_tickets_handler() {
                     tec_rb_enable_shared_capacity_for_event($event_id, $event_ticket_ids, $global_stock_level);
                     tec_rb_refresh_ticket_caches($event_id, $provider, $event_ticket_ids);
                 }
+
+                if ($waitlist_mode !== 'none' && !empty($event_ticket_ids)) {
+                    tec_rb_set_ticket_waitlist($event_id, $waitlist_mode);
+                }
+
                 tec_rb_sync_custom_tables($event_id);
             }
         }
@@ -1315,6 +1551,8 @@ function tec_rb_create_events_tickets_handler() {
             'id' => $event_id,
             'slug' => get_post_field('post_name', $event_id),
             'startDateTime' => $instance['start_datetime'],
+            'ticketIds' => $event_ticket_ids,
+            'tickets' => $event_ticket_summaries,
         );
     }
 

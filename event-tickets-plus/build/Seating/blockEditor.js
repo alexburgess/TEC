@@ -1,0 +1,1 @@
+(()=>{"use strict";(0,window.wp.hooks.addFilter)("tec.tickets.seating.allowedProviders","tec.tickets.plus.seating",(function(t){return t.push("Tribe__Tickets_Plus__Commerce__WooCommerce__Main"),t})),window.ticketsPlus=window.ticketsPlus||{},window.ticketsPlus.seating=window.ticketsPlus.seating||{},window.ticketsPlus.seating.blockEditor={}})();

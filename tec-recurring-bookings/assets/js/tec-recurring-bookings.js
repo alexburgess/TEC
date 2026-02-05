@@ -281,6 +281,14 @@
       ticketSelect.value = String(ticketCount);
       renderTickets(root, ticketCount);
     }
+    const waitlistField = root.querySelector("[data-waitlist-field]");
+    if (waitlistField) {
+      waitlistField.classList.toggle("is-hidden", ticketCount < 1);
+      if (ticketCount < 1) {
+        const noneRadio = root.querySelector('input[name="waitlist_mode"][value="none"]');
+        if (noneRadio) noneRadio.checked = true;
+      }
+    }
     const sharedCapacityInput = root.querySelector('[name="ticket_shared_capacity"]');
     const sharedCapacityField = root.querySelector("[data-shared-capacity-field]");
     const sharedCapacityControl = root.querySelector("[data-shared-capacity-control]");
@@ -319,6 +327,12 @@
       if (!sharedCapacityTotalInput.value || current > sum) {
         sharedCapacityTotalInput.value = sum ? String(sum) : "";
       }
+    }
+
+    const waitlistMode = data.waitlistMode || "none";
+    const waitlistRadio = root.querySelector(`input[name="waitlist_mode"][value="${waitlistMode}"]`);
+    if (waitlistRadio) {
+      waitlistRadio.checked = true;
     }
 
     ticketTypes.forEach((ticket, index) => {
@@ -992,6 +1006,7 @@
       ticketTypes,
       sharedCapacity: root.querySelector('[name="ticket_shared_capacity"]')?.checked ?? false,
       sharedCapacityTotal: root.querySelector('[name="shared_capacity_total"]')?.value?.trim() ?? "",
+      waitlistMode: root.querySelector('input[name="waitlist_mode"]:checked')?.value ?? "none",
     };
   };
 
@@ -1042,15 +1057,72 @@
           const id = item.id ? String(item.id) : "";
           const slug = item.slug ? String(item.slug) : "";
           const start = item.startDateTime ? String(item.startDateTime) : "";
+          const ticketEntries = Array.isArray(item.tickets) ? item.tickets : [];
+          const normalizedTickets = ticketEntries
+            .map((ticket) => {
+              if (ticket == null) return null;
+              if (typeof ticket === "object") {
+                const id = ticket.id ?? ticket.ticketId ?? ticket.ticket_id ?? ticket.ID;
+                if (id == null) return null;
+                const name =
+                  ticket.name ??
+                  ticket.title ??
+                  ticket.label ??
+                  ticket.ticketName ??
+                  ticket.ticket_name ??
+                  "";
+                return { id: String(id), name: name ? String(name) : "" };
+              }
+              const id = String(ticket).trim();
+              if (!id || id === "[object Object]") return null;
+              return { id, name: "" };
+            })
+            .filter(Boolean);
+
+          const fallbackTickets = Array.isArray(item.ticketIds)
+            ? item.ticketIds
+                .map((value) => {
+                  if (value == null) return null;
+                  if (typeof value === "object") {
+                    const id = value.id ?? value.ticketId ?? value.ticket_id ?? value.ID;
+                    if (id == null) return null;
+                    return { id: String(id), name: "" };
+                  }
+                  const id = String(value).trim();
+                  if (!id || id === "[object Object]") return null;
+                  return { id, name: "" };
+                })
+                .filter(Boolean)
+            : [];
+          const ticketsToShow = normalizedTickets.length ? normalizedTickets : fallbackTickets;
           const editHref =
             adminUrl && id ? `${adminUrl}post.php?post=${encodeURIComponent(id)}&action=edit` : "";
           const viewHref =
             siteUrl && slug ? `${siteUrl}event/${encodeURIComponent(slug)}/` : "";
+          const ticketLinks = ticketsToShow.length
+            ? ticketsToShow
+                .map((ticket) => {
+                  const ticketId = ticket.id;
+                  const ticketName = ticket.name ? ` (${ticket.name})` : "";
+                  const href = adminUrl
+                    ? `${adminUrl}post.php?post=${encodeURIComponent(ticketId)}&action=edit`
+                    : "";
+                  const label = `${ticketId}${ticketName}`;
+                  return href
+                    ? `<a target="_blank" rel="noopener" href="${escapeHtml(href)}">${escapeHtml(
+                        label
+                      )}</a>`
+                    : escapeHtml(label);
+                })
+                .join(", ")
+            : "";
           return `<li class="tec-results-item">
             <button class="tec-results-open" type="button" data-open-event data-event-id="${escapeHtml(
               id
             )}">${escapeHtml(start)}</button>
-            <span class="is-muted">ID ${escapeHtml(id)} — ${escapeHtml(slug)}</span>
+            <span class="is-muted">Event ID ${escapeHtml(id)} — ${escapeHtml(slug)}${
+              ticketLinks ? ` — Tickets: ${ticketLinks}` : ""
+            }</span>
             <span class="tec-results-links">
               ${
                 editHref
@@ -1108,11 +1180,79 @@
     URL.revokeObjectURL(url);
   };
 
+  const initDateRangePicker = (root) => {
+    const fromInput = root.querySelector('[name="event_date_from"]');
+    const toInput = root.querySelector('[name="event_date_to"]');
+    const $ = window.jQuery;
+
+    if (!fromInput || !toInput) return;
+    if (!$ || !$.fn || typeof $.fn.datepicker !== "function") return;
+
+    const sharedOptions = {
+      dateFormat: "yy-mm-dd",
+      changeMonth: true,
+      changeYear: true,
+    };
+
+    const applyConstraints = () => {
+      const fromVal = fromInput.value.trim();
+      const toVal = toInput.value.trim();
+
+      if (fromVal) {
+        $(toInput).datepicker("option", "minDate", fromVal);
+      } else {
+        $(toInput).datepicker("option", "minDate", null);
+      }
+
+      if (toVal) {
+        $(fromInput).datepicker("option", "maxDate", toVal);
+      } else {
+        $(fromInput).datepicker("option", "maxDate", null);
+      }
+
+      // ISO date string comparison works for YYYY-MM-DD.
+      if (fromVal && toVal && fromVal > toVal) {
+        toInput.value = fromVal;
+        $(toInput).datepicker("setDate", fromVal);
+      }
+    };
+
+    $(fromInput).datepicker({
+      ...sharedOptions,
+      onSelect: (dateText) => {
+        fromInput.value = dateText;
+        applyConstraints();
+        fromInput.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    });
+
+    $(toInput).datepicker({
+      ...sharedOptions,
+      onSelect: (dateText) => {
+        toInput.value = dateText;
+        applyConstraints();
+        toInput.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+    });
+
+    if (fromInput.value) {
+      $(fromInput).datepicker("setDate", fromInput.value);
+    }
+    if (toInput.value) {
+      $(toInput).datepicker("setDate", toInput.value);
+    }
+
+    fromInput.addEventListener("change", applyConstraints);
+    toInput.addEventListener("change", applyConstraints);
+    applyConstraints();
+  };
+
   const initForm = (root) => {
     const occurrenceSelect = root.querySelector("[data-occurrence-count]");
     const ticketSelect = root.querySelector("[data-ticket-count]");
     const presetSelect = root.querySelector("[data-preset-select]");
     const savePresetButton = root.querySelector("[data-save-preset]");
+    const waitlistField = root.querySelector("[data-waitlist-field]");
     const sharedCapacityField = root.querySelector("[data-shared-capacity-field]");
     const sharedCapacityInput = root.querySelector('[name="ticket_shared_capacity"]');
     const sharedCapacityControl = root.querySelector("[data-shared-capacity-control]");
@@ -1137,6 +1277,19 @@
       }
     };
 
+    const syncWaitlistVisibility = (count) => {
+      if (!waitlistField) return;
+      if (count > 0) {
+        waitlistField.classList.remove("is-hidden");
+        return;
+      }
+      waitlistField.classList.add("is-hidden");
+      const noneRadio = root.querySelector('input[name="waitlist_mode"][value="none"]');
+      if (noneRadio) {
+        noneRadio.checked = true;
+      }
+    };
+
     if (occurrenceSelect) {
       const defaultValue = occurrenceSelect.value || "1";
       occurrenceSelect.innerHTML = buildOccurrenceOptions(defaultValue);
@@ -1152,9 +1305,11 @@
       ticketSelect.innerHTML = buildTicketOptions(defaultValue);
       ticketSelect.value = defaultValue;
       renderTickets(root, Number(defaultValue));
+      syncWaitlistVisibility(Number(defaultValue));
       ticketSelect.addEventListener("change", (event) => {
-        renderTickets(root, Number(event.target.value || 1));
         const currentCount = Number(event.target.value || 0);
+        renderTickets(root, currentCount);
+        syncWaitlistVisibility(currentCount);
         if (sharedCapacityField) {
           if (currentCount > 1) {
             sharedCapacityField.classList.remove("is-hidden");
@@ -1169,6 +1324,7 @@
       });
     }
 
+    initDateRangePicker(root);
     initFeaturedImage(root);
 
     if (presetSelect && Array.isArray(configPresets)) {

@@ -146,14 +146,14 @@ $settings_url = function_exists('admin_url') ? admin_url('admin.php?page=tec-rec
           <div class="tec-field">
             <p class="tec-label">From</p>
             <div class="tec-control tec-control--date">
-              <input class="tec-input" name="event_date_from" type="date" />
+              <input class="tec-input" name="event_date_from" type="text" inputmode="numeric" placeholder="YYYY-MM-DD" />
             </div>
           </div>
           <span class="tec-range-arrow">→</span>
           <div class="tec-field">
             <p class="tec-label">To</p>
             <div class="tec-control tec-control--date">
-              <input class="tec-input" name="event_date_to" type="date" />
+              <input class="tec-input" name="event_date_to" type="text" inputmode="numeric" placeholder="YYYY-MM-DD" />
             </div>
           </div>
         </div>
@@ -216,6 +216,28 @@ $settings_url = function_exists('admin_url') ? admin_url('admin.php?page=tec-rec
         <input class="tec-input" type="number" min="0" name="shared_capacity_total" placeholder="Total shared capacity" />
       </div>
       <p class="tec-note tec-note--small is-hidden" data-shared-capacity-note>Shared capacity cannot exceed the total ticket quantities.</p>
+    </div>
+
+    <div class="tec-field" data-waitlist-field style="margin-top: 16px;">
+      <p class="tec-label tec-subtitle">Waitlist</p>
+      <div class="tec-radio-group">
+        <label class="tec-radio">
+          <input type="radio" name="waitlist_mode" value="none" checked />
+          <span>No waitlist</span>
+        </label>
+        <label class="tec-radio">
+          <input type="radio" name="waitlist_mode" value="presale_or_sold_out" />
+          <span>When tickets are on pre-sale or sold out</span>
+        </label>
+        <label class="tec-radio">
+          <input type="radio" name="waitlist_mode" value="before_sale" />
+          <span>Before tickets go on sale</span>
+        </label>
+        <label class="tec-radio">
+          <input type="radio" name="waitlist_mode" value="sold_out" />
+          <span>When tickets are sold out</span>
+        </label>
+      </div>
     </div>
 
     <div class="tec-expand-container" style="margin-top: 24px;">

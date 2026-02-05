@@ -1,0 +1,1 @@
+(()=>{"use strict";const t=tec.common.app.main.data,s=tec.common.app.main.store,{dispatch:i}=s.store,{TICKETS_PLUS:n}=t.plugins.constants;i(t.plugins.actions.addPlugin(n)),window.ticketsPlus=window.ticketsPlus||{},window.ticketsPlus.app=window.ticketsPlus.app||{},window.ticketsPlus.app.main={}})();

@@ -173,7 +173,7 @@ body {
   position: absolute;
   left: 50%;
   bottom: calc(100% + 6px);
-  transform: translate(-50%, 4px);
+  transform: translate(-50%, 0);
   background: #1f2328;
   color: #fff;
   font-size: 12px;
@@ -183,14 +183,13 @@ body {
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transition: none;
   z-index: 10;
 }
 
 .tec-info-dot:hover::after,
 .tec-info-dot:focus::after {
   opacity: 1;
-  transform: translate(-50%, 0);
 }
 
 .tec-control {
@@ -598,4 +597,63 @@ body {
   .tec-index {
     padding-top: 0;
   }
+}
+
+/* jQuery UI datepicker (WordPress core script, minimal styling) */
+.ui-datepicker {
+  background: #fff;
+  border: 1px solid var(--tec-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+  padding: 10px 10px 6px;
+  z-index: 100000 !important;
+}
+
+.ui-datepicker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.ui-datepicker-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.ui-datepicker-calendar {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.ui-datepicker-calendar th {
+  font-size: 11px;
+  color: var(--tec-text-muted);
+  padding: 4px;
+  text-align: center;
+}
+
+.ui-datepicker-calendar td {
+  padding: 2px;
+  text-align: center;
+}
+
+.ui-datepicker-calendar a {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #1f2328;
+  text-decoration: none;
+}
+
+.ui-datepicker-calendar a:hover {
+  background: var(--tec-bg-subtle);
+}
+
+.ui-datepicker-calendar .ui-state-active {
+  background: #2271b1;
+  color: #fff;
 }
