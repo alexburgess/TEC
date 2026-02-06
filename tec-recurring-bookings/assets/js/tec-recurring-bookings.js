@@ -1826,8 +1826,11 @@
 
   const initTagsPicker = (root) => {
     const entryInput = root.querySelector("[data-tags-entry]");
-    const hiddenInput = root.querySelector("[data-tags-input]");
+    const hiddenInput =
+      root.querySelector("[data-tags-input]") ||
+      root.parentElement?.querySelector("[data-tags-input]");
     const listEl = root.querySelector("[data-tags-list]");
+    const addButton = root.querySelector("[data-tags-add]");
     if (!entryInput || !hiddenInput || !listEl) return;
 
     const separator = hiddenInput.dataset.tagsSeparator === "newline" ? "\n" : ", ";
@@ -1897,6 +1900,13 @@
     entryInput.addEventListener("blur", () => {
       commitEntry();
     });
+
+    if (addButton) {
+      addButton.addEventListener("click", () => {
+        commitEntry();
+        entryInput.focus();
+      });
+    }
 
     entryInput.addEventListener("paste", (event) => {
       const text = event.clipboardData?.getData("text") ?? "";

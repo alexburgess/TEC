@@ -3178,6 +3178,7 @@ function tec_rb_render_settings_page() {
               <div class="tec-control">
                 <input class="tec-input" type="text" data-tags-entry placeholder="Type a ticket name and press Enter" />
               </div>
+              <button class="button" type="button" data-tags-add>Add</button>
               <div class="tec-tags-list" data-tags-list></div>
             </div>
             <textarea class="tec-input is-hidden" rows="4" name="tec_rb_ticket_name_suggestions" data-tags-input data-tags-separator="newline"><?php echo esc_textarea(implode("\n", $ticket_suggestions)); ?></textarea>
