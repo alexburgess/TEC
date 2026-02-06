@@ -45,7 +45,7 @@
     const options = [];
     const startMinutes = 6 * 60;
     const endMinutes = 23 * 60;
-    for (let m = startMinutes; m <= endMinutes; m += 30) {
+    for (let m = startMinutes; m <= endMinutes; m += 1) {
       const hours24 = Math.floor(m / 60);
       const minutes = m % 60;
       const suffix = hours24 >= 12 ? "PM" : "AM";
@@ -222,7 +222,10 @@
 
     setInputValue(root.querySelector('[name="event_name"]'), data.eventName);
     setInputValue(root.querySelector('[name="event_excerpt"]'), data.eventExcerpt);
-    setInputValue(root.querySelector('[name="event_tags"]'), data.eventTags);
+    const tagsValue = Array.isArray(data.eventTags)
+      ? data.eventTags.join(", ")
+      : data.eventTags;
+    setInputValue(root.querySelector('[name="event_tags"]'), tagsValue);
     setInputValue(root.querySelector('[name="event_description"]'), data.eventDescription);
     setInputValue(root.querySelector('[name="event_featured_image"]'), data.eventFeaturedImage);
     setInputValue(root.querySelector('[name="event_website"]'), data.eventWebsite);
@@ -230,9 +233,37 @@
     setSelectValue(root.querySelector('[name="event_venue"]'), data.eventVenue || "");
     setSelectValue(root.querySelector('[name="event_category"]'), data.eventCategory || "");
     setSelectValue(root.querySelector('[name="event_organizer"]'), data.eventOrganizer || "");
+    setSelectValue(root.querySelector('[name="event_series"]'), data.eventSeries || "");
 
     setInputValue(root.querySelector('[name="event_date_from"]'), data.startDate);
     setInputValue(root.querySelector('[name="event_date_to"]'), data.endDate);
+
+    const websiteToggle = root.querySelector('[name="event_website_enabled"]');
+    const websiteField = root.querySelector("[data-event-website-field]");
+    const hasWebsite = !!(data.eventWebsiteEnabled || (data.eventWebsite && String(data.eventWebsite).trim()));
+    if (websiteToggle) {
+      websiteToggle.checked = hasWebsite;
+    }
+    if (websiteField) {
+      websiteField.classList.toggle("is-hidden", !hasWebsite);
+      const input = websiteField.querySelector("input");
+      if (input) {
+        input.disabled = !hasWebsite;
+      }
+    }
+
+    const scheduleMode = data.scheduleMode || (Array.isArray(data.specificDates) && data.specificDates.length ? "specific" : "recurring");
+    const scheduleRadio = root.querySelector(`input[name="schedule_mode"][value="${scheduleMode}"]`);
+    if (scheduleRadio) {
+      scheduleRadio.checked = true;
+      scheduleRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    if (Array.isArray(data.specificDates)) {
+      setInputValue(root.querySelector('[name="specific_dates"]'), data.specificDates.join(", "));
+      if (typeof root.tecSyncSpecificDates === "function") {
+        root.tecSyncSpecificDates();
+      }
+    }
 
     const showMap = root.querySelector('[name="show_map_link"]');
     if (showMap) showMap.checked = !!data.showMapLink;
@@ -242,6 +273,18 @@
     if (stickyMonth) stickyMonth.checked = !!data.stickyInMonthView;
     const allowComments = root.querySelector('[name="allow_comments"]');
     if (allowComments) allowComments.checked = !!data.allowComments;
+    const showAttendees = root.querySelector('[name="show_attendees_list"]');
+    if (showAttendees) showAttendees.checked = !!data.showAttendeesList;
+    const featureEvent = root.querySelector('[name="feature_event"]');
+    if (featureEvent) featureEvent.checked = !!data.featureEvent;
+    const ticketHeaderFromFeatured = root.querySelector('[name="ticket_header_from_featured"]');
+    if (ticketHeaderFromFeatured) {
+      ticketHeaderFromFeatured.checked = !!data.ticketHeaderFromFeatured;
+    }
+
+    if (typeof root.tecSyncTags === "function") {
+      root.tecSyncTags();
+    }
 
     const recurrenceDays = Array.isArray(data.recurrenceDays) ? data.recurrenceDays : [];
     root.querySelectorAll('input[name="recurrence_days[]"]').forEach((input) => {
@@ -372,8 +415,8 @@
         root.querySelector(`select[name="ticket_${number}_sale_start_time"]`),
         ticket.saleStartTime
       );
-      setSelectValue(
-        root.querySelector(`select[name="ticket_${number}_sale_start_offset"]`),
+      setInputValue(
+        root.querySelector(`input[name="ticket_${number}_sale_start_offset"]`),
         ticket.saleStartOffset
       );
       setSelectValue(
@@ -389,8 +432,8 @@
         saleEndRadio.checked = true;
         saleEndRadio.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      setSelectValue(
-        root.querySelector(`select[name="ticket_${number}_sale_end_offset"]`),
+      setInputValue(
+        root.querySelector(`input[name="ticket_${number}_sale_end_offset"]`),
         ticket.saleEndOffset
       );
       setSelectValue(
@@ -422,7 +465,10 @@
       const index = i + 1;
       return `
         <div class="tec-occurrence-item">
-          <div class="tec-index">${index}</div>
+          <div class="tec-index">
+            <span class="tec-index-number">${index}</span>
+            <span class="dashicons dashicons-clock" aria-hidden="true"></span>
+          </div>
           <div class="tec-occurrence-fields">
             <div class="tec-field">
               <p class="tec-label">Occurrence Name*</p>
@@ -497,7 +543,10 @@
       const index = i + 1;
       return `
         <div class="tec-ticket-item" data-ticket-index="${index}">
-          <div class="tec-index">${index}</div>
+          <div class="tec-index">
+            <span class="tec-index-number">${index}</span>
+            <span class="dashicons dashicons-tickets-alt" aria-hidden="true"></span>
+          </div>
           <div>
             <div class="tec-ticket-top">
               <div class="tec-field">
@@ -514,7 +563,7 @@
               </div>
               <label class="tec-checkbox">
                 <input type="checkbox" name="ticket_${index}_show_description" />
-                <span>Show descriptions to guests?</span>
+                <span>Show descriptions to guests</span>
               </label>
             </div>
 
@@ -559,10 +608,8 @@
                     <input type="radio" name="ticket_${index}_sale_start" value="relative" />
                     <span>On a relative date</span>
                   </label>
-                  <div class="tec-control tec-control--select is-disabled" data-sale-start="relative">
-                    <select class="tec-select" name="ticket_${index}_sale_start_offset" disabled>
-                      ${buildOptions(["X", "1", "2", "3", "4", "5"], "X")}
-                    </select>
+                  <div class="tec-control is-disabled" data-sale-start="relative">
+                    <input class="tec-input" type="number" min="0" step="1" name="ticket_${index}_sale_start_offset" disabled placeholder="0" />
                   </div>
                   <div class="tec-control tec-control--select is-disabled" data-sale-start="relative">
                     <select class="tec-select" name="ticket_${index}_sale_start_unit" disabled>
@@ -586,10 +633,8 @@
                     <input type="radio" name="ticket_${index}_sale_end" value="relative" />
                     <span>On a relative date</span>
                   </label>
-                  <div class="tec-control tec-control--select is-disabled" data-sale-end="relative">
-                    <select class="tec-select" name="ticket_${index}_sale_end_offset" disabled>
-                      ${buildOptions(["X", "1", "2", "3", "4", "5"], "X")}
-                    </select>
+                  <div class="tec-control is-disabled" data-sale-end="relative">
+                    <input class="tec-input" type="number" min="0" step="1" name="ticket_${index}_sale_end_offset" disabled placeholder="0" />
                   </div>
                   <div class="tec-control tec-control--select is-disabled" data-sale-end="relative">
                     <select class="tec-select" name="ticket_${index}_sale_end_unit" disabled>
@@ -687,21 +732,21 @@
 
   const buildEventsCsv = (root) => {
     const getValue = (selector) => root.querySelector(selector)?.value?.trim() ?? "";
+    const getSelectText = (selector, emptySentinels) => {
+      const select = root.querySelector(selector);
+      if (!select) return "";
+      const text =
+        select.options && select.selectedIndex >= 0
+          ? select.options[select.selectedIndex].textContent?.trim() ?? ""
+          : "";
+      return normalizeSelectValue(text, emptySentinels);
+    };
     const getChecked = (selector) => root.querySelector(selector)?.checked ?? false;
     const eventName = getValue('[name="event_name"]');
     const eventExcerpt = normalizeCsvText(getValue('[name="event_excerpt"]'));
-    const eventVenue = normalizeSelectValue(
-      getValue('[name="event_venue"]'),
-      ["Select venue"]
-    );
-    const eventOrganizer = normalizeSelectValue(
-      getValue('[name="event_organizer"]'),
-      ["Select organizer"]
-    );
-    const eventCategory = normalizeSelectValue(
-      getValue('[name="event_category"]'),
-      ["Select category"]
-    );
+    const eventVenue = getSelectText('[name="event_venue"]', ["Select venue"]);
+    const eventOrganizer = getSelectText('[name="event_organizer"]', ["Select organizer"]);
+    const eventCategory = getSelectText('[name="event_category"]', ["Select category"]);
     const eventTags = normalizeCsvText(getValue('[name="event_tags"]'));
     const eventDescription = normalizeCsvText(getValue('[name="event_description"]'));
     const eventFeaturedImage = getValue('[name="event_featured_image"]');
@@ -877,9 +922,9 @@
       const saleEndMode = node.querySelector(`input[name="ticket_${ticketIndex}_sale_end"]:checked`)?.value ?? "start";
       const saleStartDate = node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_date"]`)?.value?.trim() ?? "";
       const saleStartTime = node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_time"]`)?.value ?? "";
-      const saleStartOffset = node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_offset"]`)?.value ?? "";
+      const saleStartOffset = node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_offset"]`)?.value ?? "";
       const saleStartUnit = node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_unit"]`)?.value ?? "";
-      const saleEndOffset = node.querySelector(`select[name="ticket_${ticketIndex}_sale_end_offset"]`)?.value ?? "";
+      const saleEndOffset = node.querySelector(`input[name="ticket_${ticketIndex}_sale_end_offset"]`)?.value ?? "";
       const saleEndUnit = node.querySelector(`select[name="ticket_${ticketIndex}_sale_end_unit"]`)?.value ?? "";
 
       instances.forEach((instance) => {
@@ -977,13 +1022,27 @@
         saleStartMode: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start"]:checked`)?.value ?? "immediate",
         saleStartDate: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_date"]`)?.value?.trim() ?? "",
         saleStartTime: node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_time"]`)?.value ?? "",
-        saleStartOffset: node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_offset"]`)?.value ?? "",
+        saleStartOffset: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_offset"]`)?.value ?? "",
         saleStartUnit: node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_unit"]`)?.value ?? "",
         saleEndMode: node.querySelector(`input[name="ticket_${ticketIndex}_sale_end"]:checked`)?.value ?? "start",
-        saleEndOffset: node.querySelector(`select[name="ticket_${ticketIndex}_sale_end_offset"]`)?.value ?? "",
+        saleEndOffset: node.querySelector(`input[name="ticket_${ticketIndex}_sale_end_offset"]`)?.value ?? "",
         saleEndUnit: node.querySelector(`select[name="ticket_${ticketIndex}_sale_end_unit"]`)?.value ?? "",
       };
     });
+
+    const eventWebsiteEnabled = root.querySelector('[name="event_website_enabled"]')?.checked ?? false;
+    const scheduleMode = root.querySelector('input[name="schedule_mode"]:checked')?.value ?? "recurring";
+    const specificDatesRaw = root.querySelector('[name="specific_dates"]')?.value ?? "";
+    const specificDates = specificDatesRaw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const tagsRaw = getValue('[name="event_tags"]');
+    const tagsList = tagsRaw
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
 
     return {
       eventName,
@@ -991,16 +1050,24 @@
       eventVenue: normalizeSelect(getValue('[name="event_venue"]'), ["Select venue"]),
       eventOrganizer: normalizeSelect(getValue('[name="event_organizer"]'), ["Select organizer"]),
       eventCategory: normalizeSelect(getValue('[name="event_category"]'), ["Select category"]),
-      eventTags: getValue('[name="event_tags"]'),
+      eventSeries: normalizeSelect(getValue('[name="event_series"]'), ["No series"]),
+      eventTags: tagsList,
+      eventTagsRaw: tagsRaw,
       eventDescription: getValue('[name="event_description"]'),
       eventFeaturedImage: getValue('[name="event_featured_image"]'),
-      eventWebsite: getValue('[name="event_website"]'),
+      eventWebsite: eventWebsiteEnabled ? getValue('[name="event_website"]') : "",
+      eventWebsiteEnabled,
       showMapLink: root.querySelector('[name="show_map_link"]')?.checked ?? false,
       hideFromListings: root.querySelector('[name="hide_from_listings"]')?.checked ?? false,
       stickyInMonthView: root.querySelector('[name="hide_from_month"]')?.checked ?? false,
       allowComments: root.querySelector('[name="allow_comments"]')?.checked ?? false,
+      showAttendeesList: root.querySelector('[name="show_attendees_list"]')?.checked ?? false,
+      featureEvent: root.querySelector('[name="feature_event"]')?.checked ?? false,
+      ticketHeaderFromFeatured: root.querySelector('[name="ticket_header_from_featured"]')?.checked ?? false,
       startDate: startDateValue,
       endDate: endDateValue,
+      scheduleMode,
+      specificDates,
       recurrenceDays,
       occurrences,
       ticketTypes,
@@ -1040,6 +1107,54 @@
     if (ticketCount !== null) {
       html += `<div><strong>${ticketCount}</strong> ${ticketSummary || "tickets created."}</div>`;
     }
+    const normalizeList = (value) => {
+      if (value == null) return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === "object") return Object.values(value);
+      if (typeof value === "string") {
+        return value
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean);
+      }
+      return [value];
+    };
+
+    const normalizeTicketEntry = (ticket) => {
+      if (ticket == null) return null;
+      if (Array.isArray(ticket)) {
+        if (!ticket.length) return null;
+        if (ticket.length >= 2 && (typeof ticket[0] === "string" || typeof ticket[0] === "number")) {
+          return { id: String(ticket[0]), name: ticket[1] ? String(ticket[1]) : "" };
+        }
+        return normalizeTicketEntry(ticket[0]);
+      }
+      if (typeof ticket === "object") {
+        const id =
+          ticket.id ??
+          ticket.ticketId ??
+          ticket.ticket_id ??
+          ticket.ID ??
+          ticket.post_id ??
+          null;
+        if (id == null) return null;
+        const idValue = String(id).trim();
+        if (!idValue || idValue === "[object Object]") return null;
+        const name =
+          ticket.name ??
+          ticket.title ??
+          ticket.label ??
+          ticket.ticketName ??
+          ticket.ticket_name ??
+          ticket.post_title ??
+          "";
+        return { id: idValue, name: name ? String(name) : "" };
+      }
+      const id = String(ticket).trim();
+      if (!id || id === "[object Object]") return null;
+      return { id, name: "" };
+    };
+
     const hasEventIds = found.some((item) => item && item.id);
     if (found.length && hasEventIds) {
       html += `<div class="tec-inline" style="margin-top: 12px;">
@@ -1057,43 +1172,11 @@
           const id = item.id ? String(item.id) : "";
           const slug = item.slug ? String(item.slug) : "";
           const start = item.startDateTime ? String(item.startDateTime) : "";
-          const ticketEntries = Array.isArray(item.tickets) ? item.tickets : [];
-          const normalizedTickets = ticketEntries
-            .map((ticket) => {
-              if (ticket == null) return null;
-              if (typeof ticket === "object") {
-                const id = ticket.id ?? ticket.ticketId ?? ticket.ticket_id ?? ticket.ID;
-                if (id == null) return null;
-                const name =
-                  ticket.name ??
-                  ticket.title ??
-                  ticket.label ??
-                  ticket.ticketName ??
-                  ticket.ticket_name ??
-                  "";
-                return { id: String(id), name: name ? String(name) : "" };
-              }
-              const id = String(ticket).trim();
-              if (!id || id === "[object Object]") return null;
-              return { id, name: "" };
-            })
-            .filter(Boolean);
+          const ticketEntries = normalizeList(item.tickets);
+          const normalizedTickets = ticketEntries.map(normalizeTicketEntry).filter(Boolean);
 
-          const fallbackTickets = Array.isArray(item.ticketIds)
-            ? item.ticketIds
-                .map((value) => {
-                  if (value == null) return null;
-                  if (typeof value === "object") {
-                    const id = value.id ?? value.ticketId ?? value.ticket_id ?? value.ID;
-                    if (id == null) return null;
-                    return { id: String(id), name: "" };
-                  }
-                  const id = String(value).trim();
-                  if (!id || id === "[object Object]") return null;
-                  return { id, name: "" };
-                })
-                .filter(Boolean)
-            : [];
+          const fallbackEntries = normalizeList(item.ticketIds);
+          const fallbackTickets = fallbackEntries.map(normalizeTicketEntry).filter(Boolean);
           const ticketsToShow = normalizedTickets.length ? normalizedTickets : fallbackTickets;
           const editHref =
             adminUrl && id ? `${adminUrl}post.php?post=${encodeURIComponent(id)}&action=edit` : "";
@@ -1102,27 +1185,34 @@
           const ticketLinks = ticketsToShow.length
             ? ticketsToShow
                 .map((ticket) => {
-                  const ticketId = ticket.id;
+                  const ticketId = String(ticket.id || "").trim();
+                  if (!ticketId) return "";
                   const ticketName = ticket.name ? ` (${ticket.name})` : "";
                   const href = adminUrl
                     ? `${adminUrl}post.php?post=${encodeURIComponent(ticketId)}&action=edit`
                     : "";
-                  const label = `${ticketId}${ticketName}`;
+                  const label = `#${ticketId}${ticketName}`;
                   return href
                     ? `<a target="_blank" rel="noopener" href="${escapeHtml(href)}">${escapeHtml(
                         label
                       )}</a>`
                     : escapeHtml(label);
                 })
+                .filter(Boolean)
                 .join(", ")
             : "";
+          const ticketIdsFallback = ticketsToShow
+            .map((ticket) => String(ticket.id || "").trim())
+            .filter(Boolean)
+            .join(", ");
+          const ticketDisplay = ticketLinks || (ticketIdsFallback ? escapeHtml(ticketIdsFallback) : "");
           return `<li class="tec-results-item">
             <button class="tec-results-open" type="button" data-open-event data-event-id="${escapeHtml(
               id
             )}">${escapeHtml(start)}</button>
-            <span class="is-muted">Event ID ${escapeHtml(id)} — ${escapeHtml(slug)}${
-              ticketLinks ? ` — Tickets: ${ticketLinks}` : ""
-            }</span>
+            <span class="is-muted">Event ID ${escapeHtml(id)}${
+              slug ? ` — ${escapeHtml(slug)}` : ""
+            }${ticketDisplay ? ` — Ticket IDs: ${ticketDisplay}` : ""}</span>
             <span class="tec-results-links">
               ${
                 editHref
@@ -1183,68 +1273,467 @@
   const initDateRangePicker = (root) => {
     const fromInput = root.querySelector('[name="event_date_from"]');
     const toInput = root.querySelector('[name="event_date_to"]');
+    const panel = root.querySelector("[data-date-range-panel]");
+    const calendarEl = root.querySelector("[data-date-range-calendar]");
+    const toggleButton = root.querySelector("[data-date-range-toggle]");
+    const labelEl = toggleButton ? toggleButton.querySelector("[data-date-range-label]") : null;
+    const doneButton = root.querySelector("[data-date-range-done]");
+    const clearButton = root.querySelector("[data-date-range-clear]");
     const $ = window.jQuery;
 
     if (!fromInput || !toInput) return;
     if (!$ || !$.fn || typeof $.fn.datepicker !== "function") return;
 
-    const sharedOptions = {
+    const formatDate = (date) => (date ? $.datepicker.formatDate("yy-mm-dd", date) : "");
+    const parseDate = (value) => {
+      if (!value) return null;
+      try {
+        return $.datepicker.parseDate("yy-mm-dd", value);
+      } catch (error) {
+        return null;
+      }
+    };
+
+    let startDate = parseDate(fromInput.value.trim());
+    let endDate = parseDate(toInput.value.trim());
+    if (startDate && endDate && endDate < startDate) {
+      endDate = null;
+    }
+
+    const updateButtonLabel = () => {
+      if (!toggleButton) return;
+      const hasStart = !!startDate;
+      const hasEnd = !!endDate;
+      const label = hasStart && hasEnd
+        ? `${formatDate(startDate)} → ${formatDate(endDate)}`
+        : "Select date range";
+      if (labelEl) {
+        labelEl.textContent = label;
+      } else {
+        toggleButton.textContent = label;
+      }
+    };
+
+    const syncInputs = () => {
+      fromInput.value = formatDate(startDate);
+      toInput.value = formatDate(endDate);
+      updateButtonLabel();
+    };
+
+    const highlightRange = (date) => {
+      let classes = [];
+      if (startDate && date.getTime() === startDate.getTime()) {
+        classes.push("tec-range-start");
+      }
+      if (endDate && date.getTime() === endDate.getTime()) {
+        classes.push("tec-range-end");
+      }
+      if (startDate && endDate && date > startDate && date < endDate) {
+        classes.push("tec-range-between");
+      }
+      return [true, classes.join(" ")];
+    };
+
+    const refreshCalendar = () => {
+      if (calendarEl) {
+        $(calendarEl).datepicker("refresh");
+      }
+    };
+
+    if (calendarEl) {
+      $(calendarEl).datepicker({
+        dateFormat: "yy-mm-dd",
+        numberOfMonths: 2,
+        showOtherMonths: true,
+        selectOtherMonths: true,
+        changeMonth: true,
+        changeYear: true,
+        beforeShowDay: highlightRange,
+        onSelect: () => {
+          const selected = $(calendarEl).datepicker("getDate");
+          if (!selected) return;
+          if (!startDate || (startDate && endDate)) {
+            startDate = selected;
+            endDate = null;
+          } else if (selected < startDate) {
+            startDate = selected;
+            endDate = null;
+          } else {
+            endDate = selected;
+          }
+          syncInputs();
+          refreshCalendar();
+          fromInput.dispatchEvent(new Event("change", { bubbles: true }));
+          toInput.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+      });
+      if (startDate) {
+        $(calendarEl).datepicker("setDate", startDate);
+      }
+      refreshCalendar();
+      updateButtonLabel();
+    } else {
+      const sharedOptions = {
+        dateFormat: "yy-mm-dd",
+        changeMonth: true,
+        changeYear: true,
+      };
+      const applyConstraints = () => {
+        const fromVal = fromInput.value.trim();
+        const toVal = toInput.value.trim();
+        if (fromVal) {
+          $(toInput).datepicker("option", "minDate", fromVal);
+        } else {
+          $(toInput).datepicker("option", "minDate", null);
+        }
+        if (toVal) {
+          $(fromInput).datepicker("option", "maxDate", toVal);
+        } else {
+          $(fromInput).datepicker("option", "maxDate", null);
+        }
+        if (fromVal && toVal && fromVal > toVal) {
+          toInput.value = fromVal;
+          $(toInput).datepicker("setDate", fromVal);
+        }
+      };
+      $(fromInput).datepicker({
+        ...sharedOptions,
+        onSelect: (dateText) => {
+          fromInput.value = dateText;
+          applyConstraints();
+          fromInput.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+      });
+      $(toInput).datepicker({
+        ...sharedOptions,
+        onSelect: (dateText) => {
+          toInput.value = dateText;
+          applyConstraints();
+          toInput.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+      });
+      if (fromInput.value) {
+        $(fromInput).datepicker("setDate", fromInput.value);
+      }
+      if (toInput.value) {
+        $(toInput).datepicker("setDate", toInput.value);
+      }
+      fromInput.addEventListener("change", applyConstraints);
+      toInput.addEventListener("change", applyConstraints);
+      applyConstraints();
+      updateButtonLabel();
+      return;
+    }
+
+    const togglePanel = (force) => {
+      if (!panel) return;
+      const shouldOpen = typeof force === "boolean" ? force : panel.classList.contains("is-hidden");
+      panel.classList.toggle("is-hidden", !shouldOpen);
+    };
+
+    if (toggleButton) {
+      toggleButton.addEventListener("click", () => togglePanel());
+    }
+    if (doneButton) {
+      doneButton.addEventListener("click", () => togglePanel(false));
+    }
+    if (clearButton) {
+      clearButton.addEventListener("click", () => {
+        startDate = null;
+        endDate = null;
+        syncInputs();
+        refreshCalendar();
+      });
+    }
+
+    fromInput.addEventListener("focus", () => togglePanel(true));
+    toInput.addEventListener("focus", () => togglePanel(true));
+
+    fromInput.addEventListener("change", () => {
+      startDate = parseDate(fromInput.value.trim());
+      if (startDate && endDate && endDate < startDate) {
+        endDate = null;
+        toInput.value = "";
+      }
+      refreshCalendar();
+      updateButtonLabel();
+    });
+    toInput.addEventListener("change", () => {
+      endDate = parseDate(toInput.value.trim());
+      if (startDate && endDate && endDate < startDate) {
+        startDate = endDate;
+        endDate = null;
+        fromInput.value = formatDate(startDate);
+        toInput.value = "";
+      }
+      refreshCalendar();
+      updateButtonLabel();
+    });
+  };
+
+  const initEventWebsiteToggle = (root) => {
+    const toggle = root.querySelector('[name="event_website_enabled"]');
+    const field = root.querySelector("[data-event-website-field]");
+    if (!toggle || !field) return;
+    const input = field.querySelector("input");
+    const sync = () => {
+      const enabled = !!toggle.checked;
+      field.classList.toggle("is-hidden", !enabled);
+      if (input) {
+        input.disabled = !enabled;
+      }
+    };
+    toggle.addEventListener("change", sync);
+    sync();
+  };
+
+  const initScheduleMode = (root) => {
+    const specificSection = root.querySelector("[data-schedule-specific]");
+    const recurringSection = root.querySelector("[data-schedule-recurring]");
+    const radios = root.querySelectorAll('input[name="schedule_mode"]');
+    if (!specificSection || !recurringSection || radios.length === 0) return;
+    const sync = () => {
+      const mode = root.querySelector('input[name="schedule_mode"]:checked')?.value ?? "recurring";
+      const isSpecific = mode === "specific";
+      specificSection.classList.toggle("is-hidden", !isSpecific);
+      recurringSection.classList.toggle("is-hidden", isSpecific);
+    };
+    radios.forEach((radio) => radio.addEventListener("change", sync));
+    sync();
+  };
+
+  const initSpecificDatesPicker = (root) => {
+    const calendarEl = root.querySelector("[data-specific-calendar]");
+    const listEl = root.querySelector("[data-specific-list]");
+    const input = root.querySelector("[data-specific-input]");
+    const clearButton = root.querySelector("[data-specific-clear]");
+    const $ = window.jQuery;
+    if (!calendarEl || !listEl || !input || !$ || !$.fn || typeof $.fn.datepicker !== "function") {
+      return;
+    }
+
+    let selected = new Set();
+
+    const parseInput = () => {
+      selected = new Set(
+        (input.value || "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      );
+    };
+
+    const syncInput = () => {
+      const values = Array.from(selected.values()).sort();
+      input.value = values.join(", ");
+    };
+
+    const renderList = () => {
+      const values = Array.from(selected.values()).sort();
+      if (!values.length) {
+        listEl.innerHTML = '<span class="is-muted">No dates selected.</span>';
+        return;
+      }
+      listEl.innerHTML = values
+        .map(
+          (value) =>
+            `<button type="button" class="tec-specific-pill" data-specific-date="${value}">${value} <span aria-hidden="true">×</span></button>`
+        )
+        .join("");
+    };
+
+    const toggleDate = (dateText) => {
+      if (selected.has(dateText)) {
+        selected.delete(dateText);
+      } else {
+        selected.add(dateText);
+      }
+      syncInput();
+      renderList();
+      $(calendarEl).datepicker("refresh");
+    };
+
+    $(calendarEl).datepicker({
       dateFormat: "yy-mm-dd",
+      numberOfMonths: 2,
+      showOtherMonths: true,
+      selectOtherMonths: true,
       changeMonth: true,
       changeYear: true,
-    };
-
-    const applyConstraints = () => {
-      const fromVal = fromInput.value.trim();
-      const toVal = toInput.value.trim();
-
-      if (fromVal) {
-        $(toInput).datepicker("option", "minDate", fromVal);
-      } else {
-        $(toInput).datepicker("option", "minDate", null);
-      }
-
-      if (toVal) {
-        $(fromInput).datepicker("option", "maxDate", toVal);
-      } else {
-        $(fromInput).datepicker("option", "maxDate", null);
-      }
-
-      // ISO date string comparison works for YYYY-MM-DD.
-      if (fromVal && toVal && fromVal > toVal) {
-        toInput.value = fromVal;
-        $(toInput).datepicker("setDate", fromVal);
-      }
-    };
-
-    $(fromInput).datepicker({
-      ...sharedOptions,
+      beforeShowDay: (date) => {
+        const value = $.datepicker.formatDate("yy-mm-dd", date);
+        if (selected.has(value)) {
+          return [true, "tec-specific-selected"];
+        }
+        return [true, ""];
+      },
       onSelect: (dateText) => {
-        fromInput.value = dateText;
-        applyConstraints();
-        fromInput.dispatchEvent(new Event("change", { bubbles: true }));
+        toggleDate(dateText);
       },
     });
 
-    $(toInput).datepicker({
-      ...sharedOptions,
-      onSelect: (dateText) => {
-        toInput.value = dateText;
-        applyConstraints();
-        toInput.dispatchEvent(new Event("change", { bubbles: true }));
-      },
+    listEl.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-specific-date]");
+      if (!target) return;
+      const value = target.getAttribute("data-specific-date");
+      if (!value) return;
+      selected.delete(value);
+      syncInput();
+      renderList();
+      $(calendarEl).datepicker("refresh");
     });
 
-    if (fromInput.value) {
-      $(fromInput).datepicker("setDate", fromInput.value);
-    }
-    if (toInput.value) {
-      $(toInput).datepicker("setDate", toInput.value);
+    if (clearButton) {
+      clearButton.addEventListener("click", () => {
+        selected.clear();
+        syncInput();
+        renderList();
+        $(calendarEl).datepicker("refresh");
+      });
     }
 
-    fromInput.addEventListener("change", applyConstraints);
-    toInput.addEventListener("change", applyConstraints);
-    applyConstraints();
+    const syncFromInput = () => {
+      parseInput();
+      renderList();
+      $(calendarEl).datepicker("refresh");
+    };
+
+    root.tecSyncSpecificDates = syncFromInput;
+    syncFromInput();
+  };
+
+  const initRichTextToolbar = (root) => {
+    const toolbar = root.querySelector("[data-rich-toolbar]");
+    const textarea = root.querySelector("[data-rich-text]");
+    if (!toolbar || !textarea) return;
+
+    const wrapSelection = (before, after) => {
+      const start = textarea.selectionStart ?? 0;
+      const end = textarea.selectionEnd ?? 0;
+      const value = textarea.value;
+      const selectedText = value.slice(start, end);
+      const replacement = `${before}${selectedText || ""}${after}`;
+      textarea.value = value.slice(0, start) + replacement + value.slice(end);
+      const cursor = start + before.length + (selectedText ? selectedText.length : 0) + after.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    toolbar.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-format]");
+      if (!button) return;
+      const format = button.getAttribute("data-format");
+      if (!format) return;
+      event.preventDefault();
+      if (format === "bold") {
+        wrapSelection("<strong>", "</strong>");
+      } else if (format === "italic") {
+        wrapSelection("<em>", "</em>");
+      } else if (format === "underline") {
+        wrapSelection("<u>", "</u>");
+      } else if (format === "link") {
+        const url = window.prompt("Enter URL");
+        if (!url) return;
+        const start = textarea.selectionStart ?? 0;
+        const end = textarea.selectionEnd ?? 0;
+        const value = textarea.value;
+        const selectedText = value.slice(start, end) || "Link text";
+        const html = `<a href="${url}">${selectedText}</a>`;
+        textarea.value = value.slice(0, start) + html + value.slice(end);
+        const cursor = start + html.length;
+        textarea.focus();
+        textarea.setSelectionRange(cursor, cursor);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  };
+
+  const initTagsPicker = (root) => {
+    const entryInput = root.querySelector("[data-tags-entry]");
+    const hiddenInput = root.querySelector("[data-tags-input]");
+    const listEl = root.querySelector("[data-tags-list]");
+    if (!entryInput || !hiddenInput || !listEl) return;
+
+    let tags = [];
+
+    const normalizeTags = (items) =>
+      Array.from(
+        new Set(
+          items
+            .map((item) => String(item).trim())
+            .filter((item) => item.length > 0)
+        )
+      );
+
+    const syncHidden = () => {
+      hiddenInput.value = tags.join(", ");
+    };
+
+    const renderList = () => {
+      if (!tags.length) {
+        listEl.innerHTML = '<span class="is-muted">No tags added.</span>';
+        return;
+      }
+      listEl.innerHTML = tags
+        .map(
+          (tag) =>
+            `<button type="button" class="tec-tag-pill" data-tag="${escapeHtml(
+              tag
+            )}">${escapeHtml(tag)} <span aria-hidden="true">×</span></button>`
+        )
+        .join("");
+    };
+
+    const addTagsFromValue = (value) => {
+      if (!value) return;
+      const parts = value.split(",").map((part) => part.trim());
+      tags = normalizeTags([...tags, ...parts]);
+      syncHidden();
+      renderList();
+    };
+
+    entryInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === ",") {
+        event.preventDefault();
+        const value = entryInput.value.replace(/,+$/, "").trim();
+        addTagsFromValue(value);
+        entryInput.value = "";
+      }
+    });
+
+    entryInput.addEventListener("blur", () => {
+      const value = entryInput.value.trim();
+      addTagsFromValue(value);
+      entryInput.value = "";
+    });
+
+    entryInput.addEventListener("paste", (event) => {
+      const text = event.clipboardData?.getData("text") ?? "";
+      if (text.includes(",")) {
+        event.preventDefault();
+        addTagsFromValue(text);
+        entryInput.value = "";
+      }
+    });
+
+    listEl.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-tag]");
+      if (!target) return;
+      const tag = target.getAttribute("data-tag");
+      tags = tags.filter((item) => item !== tag);
+      syncHidden();
+      renderList();
+    });
+
+    const syncFromHidden = () => {
+      tags = normalizeTags((hiddenInput.value || "").split(","));
+      syncHidden();
+      renderList();
+    };
+
+    root.tecSyncTags = syncFromHidden;
+    syncFromHidden();
   };
 
   const initForm = (root) => {
@@ -1326,6 +1815,36 @@
 
     initDateRangePicker(root);
     initFeaturedImage(root);
+    initEventWebsiteToggle(root);
+    initScheduleMode(root);
+    initSpecificDatesPicker(root);
+    initRichTextToolbar(root);
+    initTagsPicker(root);
+
+    const applyDefaults = () => {
+      const defaults = window.tecRecurringBookingsConfig?.defaults || {};
+      const setChecked = (selector, value) => {
+        const el = root.querySelector(selector);
+        if (!el) return;
+        el.checked = !!value;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      setChecked('[name="hide_from_listings"]', defaults.hide_from_listings);
+      setChecked('[name="hide_from_month"]', defaults.sticky_in_month);
+      setChecked('[name="show_map_link"]', defaults.show_map_link);
+      setChecked('[name="show_attendees_list"]', defaults.show_attendees_list);
+      setChecked('[name="allow_comments"]', defaults.allow_comments);
+      setChecked('[name="feature_event"]', defaults.feature_event);
+      setChecked('[name="event_website_enabled"]', defaults.event_website_enabled);
+
+      const waitlistMode = defaults.waitlist_mode || "none";
+      const waitlistRadio = root.querySelector(`input[name="waitlist_mode"][value="${waitlistMode}"]`);
+      if (waitlistRadio) {
+        waitlistRadio.checked = true;
+      }
+    };
+
+    applyDefaults();
 
     if (presetSelect && Array.isArray(configPresets)) {
       const options = [
@@ -1472,11 +1991,17 @@
         }
 
         const payload = buildEventPayload(root);
-        if (!payload.eventName || !payload.startDate || !payload.endDate) {
+        const requiresRange = payload.scheduleMode !== "specific";
+        const hasSpecificDates = Array.isArray(payload.specificDates) && payload.specificDates.length > 0;
+        if (!payload.eventName || (requiresRange && (!payload.startDate || !payload.endDate)) || (!requiresRange && !hasSpecificDates)) {
           renderImportResults(resultsContainer, {
             found: [],
             missing: [],
-            errors: ["Please provide event name, start date, and end date."],
+            errors: [
+              requiresRange
+                ? "Please provide event name, start date, and end date."
+                : "Please provide event name and at least one specific date.",
+            ],
             summary: "events would be created.",
           });
           return;
@@ -1547,11 +2072,17 @@
         }
 
         const payload = buildEventPayload(root);
-        if (!payload.eventName || !payload.startDate || !payload.endDate) {
+        const requiresRange = payload.scheduleMode !== "specific";
+        const hasSpecificDates = Array.isArray(payload.specificDates) && payload.specificDates.length > 0;
+        if (!payload.eventName || (requiresRange && (!payload.startDate || !payload.endDate)) || (!requiresRange && !hasSpecificDates)) {
           renderImportResults(resultsContainer, {
             found: [],
             missing: [],
-            errors: ["Please provide event name, start date, and end date."],
+            errors: [
+              requiresRange
+                ? "Please provide event name, start date, and end date."
+                : "Please provide event name and at least one specific date.",
+            ],
             summary: "events created.",
           });
           return;

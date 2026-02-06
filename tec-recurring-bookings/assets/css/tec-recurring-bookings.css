@@ -1,20 +1,17 @@
 :root {
-  --tec-text: #1e1e1e;
-  --tec-text-muted: #757575;
-  --tec-text-light: #b3b3b3;
-  --tec-border: #d9d9d9;
-  --tec-border-muted: #b3b3b3;
-  --tec-bg: #ffffff;
-  --tec-bg-muted: #f5f5f5;
-  --tec-bg-disabled: #d9d9d9;
-  --tec-brand: #2c2c2c;
-  --tec-radius: 8px;
-  --tec-radius-sm: 4px;
-  --tec-shadow: 0 1px 4px rgba(12, 12, 13, 0.1), 0 1px 4px rgba(12, 12, 13, 0.05);
-
-  --tec-icon-chevron: url("https://www.figma.com/api/mcp/asset/b4711682-998c-41a6-8519-433cfcaa39f2");
-  --tec-icon-calendar: url("https://www.figma.com/api/mcp/asset/a503052d-10a0-4e4f-94ff-8deb698be7aa");
-  --tec-icon-drag: url("https://www.figma.com/api/mcp/asset/bcdcfd31-fe2c-42fa-a169-9c29f8706d72");
+  --tec-text: #1d2327;
+  --tec-text-muted: #50575e;
+  --tec-text-light: #8c8f94;
+  --tec-border: #c3c4c7;
+  --tec-border-muted: #a7aaad;
+  --tec-bg: #f0f0f1;
+  --tec-bg-muted: #f6f7f7;
+  --tec-bg-disabled: #f6f7f7;
+  --tec-input-bg: #ffffff;
+  --tec-brand: #2271b1;
+  --tec-radius: 4px;
+  --tec-radius-sm: 3px;
+  --tec-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
 }
 
 * {
@@ -23,15 +20,71 @@
 
 body {
   margin: 0;
-  font-family: "Inter", "Segoe UI", sans-serif;
   color: var(--tec-text);
   background: var(--tec-bg);
 }
 
+body.toplevel_page_tec-recurring-bookings #wpcontent,
+body.ticketpack_page_tec-recurring-bookings #wpcontent,
+body.ticketpack_page_tec-recurring-bookings-settings #wpcontent,
+body.ticketpack_page_tec-recurring-bookings-debug #wpcontent,
+body.toplevel_page_tec-recurring-bookings #wpbody-content,
+body.ticketpack_page_tec-recurring-bookings #wpbody-content,
+body.ticketpack_page_tec-recurring-bookings-settings #wpbody-content,
+body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
+  padding-left: 0;
+}
+
+.tec-wrap {
+  margin: 0;
+  padding: 0;
+}
+
 .tec-app {
-  max-width: 1040px;
-  margin: 24px auto 48px;
-  padding: 0 16px;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: var(--tec-bg);
+}
+
+.tec-topbar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--tec-border);
+  padding: 20px 24px;
+  margin: 0 0 24px;
+}
+
+.tec-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.tec-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tec-logo {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #000;
+}
+
+.tec-logo svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.tec-logo svg .cls-1 {
+  fill: currentColor !important;
 }
 
 .tec-header {
@@ -52,6 +105,14 @@ body {
   min-width: 220px;
 }
 
+.is-hidden {
+  display: none !important;
+}
+
+.is-muted {
+  color: var(--tec-text-muted);
+}
+
 .tec-field.is-hidden {
   display: none;
 }
@@ -67,10 +128,11 @@ body {
 
 .tec-form {
   margin: 0;
+  padding: 0 24px 48px;
 }
 
 .tec-title {
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: -1px;
   margin: 0;
@@ -81,7 +143,7 @@ body {
 }
 
 .tec-section-title {
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 600;
   margin: 0 0 4px;
 }
@@ -104,7 +166,7 @@ body {
 }
 
 .tec-image-preview {
-  background: var(--tec-bg-muted);
+  background: var(--tec-bg-disabled);
   border-radius: var(--tec-radius);
   height: 180px;
   border: 1px solid var(--tec-border);
@@ -120,6 +182,16 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px 24px;
+}
+
+.tec-row-fields {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.tec-row-fields .tec-select {
+  max-width: 220px;
 }
 
 .tec-grid--stack {
@@ -142,6 +214,10 @@ body {
   gap: 8px;
 }
 
+.tec-field--full {
+  grid-column: 1 / -1;
+}
+
 .tec-label-row {
   display: flex;
   align-items: center;
@@ -150,6 +226,7 @@ body {
 
 .tec-label {
   font-size: 14px;
+  font-weight: 700;
   margin: 0;
 }
 
@@ -206,9 +283,8 @@ body {
   border-radius: var(--tec-radius);
   padding: 8px 12px;
   font-size: 14px;
-  font-family: inherit;
   color: var(--tec-text);
-  background: var(--tec-bg);
+  background: var(--tec-input-bg);
 }
 
 .tec-input,
@@ -231,6 +307,39 @@ body {
 .tec-textarea {
   min-height: 90px;
   resize: vertical;
+}
+
+.tec-input--xl {
+  height: 48px;
+  font-size: 16px;
+  padding: 10px 14px;
+}
+
+.tec-textarea-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--tec-border);
+  border-radius: var(--tec-radius);
+  background: var(--tec-bg-muted);
+}
+
+.tec-toolbar-button {
+  border: 1px solid transparent;
+  background: #ffffff;
+  border-radius: var(--tec-radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tec-toolbar-button:hover {
+  border-color: var(--tec-border);
+}
+
+.tec-checkbox--inline {
+  align-items: center;
 }
 
 .tec-select {
@@ -315,6 +424,14 @@ body {
   flex-wrap: wrap;
 }
 
+.tec-range--hidden {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 .tec-range-arrow,
 .tec-arrow {
   font-size: 18px;
@@ -338,7 +455,7 @@ body {
   border: 1px solid var(--tec-border);
   border-radius: var(--tec-radius);
   padding: 16px;
-  background: var(--tec-bg);
+  background: var(--tec-bg-muted);
 }
 
 .tec-expand-container.is-hidden {
@@ -348,14 +465,33 @@ body {
 .tec-occurrence-item,
 .tec-ticket-item {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
   gap: 16px;
 }
 
 .tec-index {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   font-weight: 600;
   font-size: 14px;
-  padding-top: 26px;
+  padding-top: 8px;
+  color: var(--tec-text-muted);
+}
+
+.tec-ticket-item + .tec-ticket-item {
+  border-top: 1px solid var(--tec-border);
+  padding-top: 16px;
+}
+
+.tec-schedule-mode {
+  margin-bottom: 16px;
+}
+
+.tec-index .dashicons {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--tec-text-muted);
 }
 
 .tec-occurrence-fields {
@@ -403,10 +539,28 @@ body {
   flex: 1;
 }
 
+.tec-featured-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tec-featured-row .tec-control {
+  flex: 1;
+  min-width: 240px;
+}
+
+.tec-image-preview--small {
+  width: 96px;
+  height: 64px;
+  border-radius: var(--tec-radius);
+}
+
 .tec-button-secondary {
   border: 1px solid var(--tec-border);
-  background: var(--tec-bg);
-  color: var(--tec-text);
+  background: var(--tec-bg-disabled);
+  color: var(--tec-brand);
   border-radius: var(--tec-radius);
   padding: 10px 14px;
   height: 40px;
@@ -429,7 +583,7 @@ body {
   border: 1px solid var(--tec-border);
   border-radius: var(--tec-radius);
   padding: 12px;
-  background: #fafafa;
+  background: var(--tec-bg-muted);
   font-size: 13px;
   color: var(--tec-text);
   min-height: 24px;
@@ -503,7 +657,7 @@ body {
 }
 
 .tec-modal-card {
-  background: #ffffff;
+  background: var(--tec-input-bg);
   border-radius: var(--tec-radius);
   padding: 20px;
   max-width: 420px;
@@ -526,6 +680,12 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+  align-items: center;
+}
+
+.tec-modal-actions .tec-button,
+.tec-modal-actions .tec-button-secondary {
+  margin-top: 0;
 }
 
 .tec-ticket-mid.tec-grid--stack {
@@ -549,7 +709,7 @@ body {
 .tec-button {
   margin-top: 24px;
   background: var(--tec-brand);
-  color: #f5f5f5;
+  color: #ffffff;
   border: 1px solid var(--tec-brand);
   border-radius: var(--tec-radius);
   padding: 12px 18px;
@@ -567,6 +727,37 @@ body {
   margin: 0 0 12px;
 }
 
+.tec-date-range-picker {
+  margin-top: 12px;
+}
+
+.tec-date-range-picker .tec-button-secondary {
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
+}
+
+.tec-date-range-panel {
+  border: 1px solid var(--tec-border);
+  border-radius: var(--tec-radius);
+  padding: 12px;
+  background: var(--tec-bg-muted);
+  margin-top: 10px;
+  max-width: 100%;
+  display: inline-block;
+}
+
+.tec-date-range-panel.is-hidden {
+  display: none;
+}
+
+.tec-date-range-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 @media (max-width: 900px) {
   .tec-event-grid {
     grid-template-columns: 1fr;
@@ -577,6 +768,7 @@ body {
   }
 
   .tec-grid,
+  .tec-row-fields,
   .tec-grid-3,
   .tec-occurrence-fields,
   .tec-ticket-top,
@@ -597,16 +789,134 @@ body {
   .tec-index {
     padding-top: 0;
   }
+
+  .tec-featured-row {
+    align-items: stretch;
+  }
+}
+
+.tec-specific-picker {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.tec-specific-calendar {
+  min-width: 280px;
+}
+
+.tec-specific-summary {
+  min-width: 220px;
+}
+
+.tec-specific-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tec-specific-pill {
+  border: 1px solid var(--tec-border);
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tec-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tec-tag-pill {
+  border: 1px solid var(--tec-border);
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tec-tags-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tec-tags-row .tec-control {
+  flex: 0 0 240px;
+}
+
+.tec-tags-row .tec-tags-list {
+  flex: 1;
+  min-height: 36px;
 }
 
 /* jQuery UI datepicker (WordPress core script, minimal styling) */
 .ui-datepicker {
-  background: #fff;
+  background: var(--tec-input-bg);
   border: 1px solid var(--tec-border);
   border-radius: 10px;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
   padding: 10px 10px 6px;
   z-index: 100000 !important;
+}
+
+.tec-date-range-calendar .ui-datepicker {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.tec-date-range-calendar .ui-datepicker-multi {
+  display: flex;
+  gap: 24px;
+  width: auto;
+  min-width: 560px;
+}
+
+.tec-date-range-calendar .ui-datepicker-multi .ui-datepicker-group {
+  float: none !important;
+  width: 50%;
+}
+
+.tec-date-range-calendar {
+  overflow-x: auto;
+}
+
+.tec-specific-calendar .ui-datepicker {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  width: auto !important;
+  max-width: none !important;
+}
+
+.tec-specific-calendar .ui-datepicker-multi {
+  display: flex !important;
+  gap: 24px;
+  width: auto;
+  min-width: 560px;
+  flex-wrap: nowrap;
+}
+
+.tec-specific-calendar .ui-datepicker-multi .ui-datepicker-group {
+  float: none !important;
+  width: 50% !important;
+  display: block;
+}
+
+.tec-specific-calendar {
+  overflow-x: auto;
+}
+
+.tec-specific-calendar .ui-datepicker-row-break {
+  display: none !important;
 }
 
 .ui-datepicker-header {
@@ -650,10 +960,29 @@ body {
 }
 
 .ui-datepicker-calendar a:hover {
-  background: var(--tec-bg-subtle);
+  background: #e5f0ff;
 }
 
 .ui-datepicker-calendar .ui-state-active {
-  background: #2271b1;
+  background: var(--tec-brand);
   color: #fff;
+}
+
+.ui-datepicker td.tec-specific-selected a {
+  background: var(--tec-brand);
+  color: #fff;
+  border-radius: 999px;
+}
+
+.ui-datepicker td.tec-range-between a {
+  background: #e5f0ff;
+  color: var(--tec-text);
+  border-radius: 0;
+}
+
+.ui-datepicker td.tec-range-start a,
+.ui-datepicker td.tec-range-end a {
+  background: var(--tec-brand);
+  color: #fff;
+  border-radius: 999px;
 }

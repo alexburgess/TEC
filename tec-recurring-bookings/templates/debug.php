@@ -1,6 +1,6 @@
 <div class="tec-app" data-tec-recurring-bookings>
   <div class="tec-header">
-    <h1 class="tec-title">TEC.dog Debug Compare</h1>
+    <h1 class="tec-title">TicketPup Debug Compare</h1>
   </div>
 
   <section class="tec-section">

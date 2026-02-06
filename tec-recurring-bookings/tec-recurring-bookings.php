@@ -1,8 +1,8 @@
 <?php
 /**
- * Plugin Name: TEC.dog
+ * Plugin Name: TicketPup
  * Description: Create recurring events and tickets for The Events Calendar.
- * Version: 0.1.0
+ * Version: 1.0
  * Author: Alex Burgess
  * Author URI: https://thisisa.intentionallyblank.page
  * Requires at least: 6.9
@@ -16,8 +16,8 @@ function tec_rb_enqueue_assets() {
     $base_url = plugin_dir_url(__FILE__);
     $css_path = __DIR__ . '/assets/css/tec-recurring-bookings.css';
     $js_path = __DIR__ . '/assets/js/tec-recurring-bookings.js';
-    $css_ver = file_exists($css_path) ? filemtime($css_path) : '0.1.0';
-    $js_ver = file_exists($js_path) ? filemtime($js_path) : '0.1.0';
+    $css_ver = file_exists($css_path) ? filemtime($css_path) : '1.0';
+    $js_ver = file_exists($js_path) ? filemtime($js_path) : '1.0';
 
     wp_enqueue_style(
         'tec-recurring-bookings',
@@ -50,8 +50,78 @@ function tec_rb_enqueue_assets() {
             'eventsManagerUrl' => admin_url('edit.php?post_type=tribe_events&page=tribe-admin-manager'),
             'nonce' => wp_create_nonce('tec_rb_ajax'),
             'presets' => tec_rb_get_presets(),
+            'defaults' => tec_rb_get_default_options(),
         )
     );
+}
+
+function tec_rb_get_menu_icon() {
+    $candidates = array(
+        __DIR__ . '/assets/images/logo.svg',
+    );
+    $icon_path = '';
+    foreach ($candidates as $candidate) {
+        if (file_exists($candidate)) {
+            $icon_path = $candidate;
+            break;
+        }
+    }
+    if ($icon_path === '') {
+        return 'dashicons-calendar-alt';
+    }
+    $svg = file_get_contents($icon_path);
+    if ($svg === false) {
+        return 'dashicons-calendar-alt';
+    }
+    $svg = trim($svg);
+    if ($svg === '') {
+        return 'dashicons-calendar-alt';
+    }
+    $encoded = base64_encode($svg);
+    return 'data:image/svg+xml;base64,' . $encoded;
+}
+
+function tec_rb_get_header_logo_svg() {
+    $candidates = array(
+        __DIR__ . '/assets/images/logo.svg',
+        __DIR__ . '/assets/images/icon.svg',
+        __DIR__ . '/assets/images/icon.sv',
+    );
+    $logo_path = '';
+    foreach ($candidates as $candidate) {
+        if (file_exists($candidate)) {
+            $logo_path = $candidate;
+            break;
+        }
+    }
+    if ($logo_path === '') {
+        return '';
+    }
+    $svg = file_get_contents($logo_path);
+    if ($svg === false) {
+        return '';
+    }
+    $svg = trim($svg);
+    if ($svg === '') {
+        return '';
+    }
+    $svg = preg_replace('/fill:\s*#[0-9a-fA-F]{3,6}\s*;?/i', 'fill: currentColor;', $svg);
+    if (preg_match('/<svg\b[^>]*>/i', $svg, $matches)) {
+        $tag = $matches[0];
+        $new_tag = $tag;
+        if (!preg_match('/\bwidth=/i', $tag)) {
+            $new_tag = rtrim($new_tag, '>') . ' width="36"';
+        }
+        if (!preg_match('/\bheight=/i', $tag)) {
+            $new_tag = rtrim($new_tag, '>') . ' height="36"';
+        }
+        if (!preg_match('/\bstyle=/i', $tag)) {
+            $new_tag = rtrim($new_tag, '>') . ' style="display:block;width:36px;height:36px;"';
+        }
+        $new_tag = rtrim($new_tag, '>') . '>';
+        $svg = preg_replace('/<svg\b[^>]*>/i', $new_tag, $svg, 1);
+    }
+    return $svg;
 }
 
 function tec_rb_parse_list($value, $fallback = array()) {
@@ -69,6 +139,119 @@ function tec_rb_get_option_list($key, $fallback = array()) {
     return tec_rb_parse_list($value, $fallback);
 }
 
+function tec_rb_get_venues_list() {
+    $venues = get_posts(array(
+        'post_type' => 'tribe_venue',
+        'post_status' => array('publish', 'private'),
+        'posts_per_page' => -1,
+        'orderby' => 'title',
+        'order' => 'ASC',
+        'no_found_rows' => true,
+    ));
+    return array_map(function ($venue) {
+        return array(
+            'id' => (int) $venue->ID,
+            'name' => $venue->post_title,
+        );
+    }, $venues);
+}
+
+function tec_rb_get_organizers_list() {
+    $organizers = get_posts(array(
+        'post_type' => 'tribe_organizer',
+        'post_status' => array('publish', 'private'),
+        'posts_per_page' => -1,
+        'orderby' => 'title',
+        'order' => 'ASC',
+        'no_found_rows' => true,
+    ));
+    return array_map(function ($organizer) {
+        return array(
+            'id' => (int) $organizer->ID,
+            'name' => $organizer->post_title,
+        );
+    }, $organizers);
+}
+
+function tec_rb_get_categories_list() {
+    $taxonomy = class_exists('Tribe__Events__Main') ? Tribe__Events__Main::TAXONOMY : 'tribe_events_cat';
+    $terms = get_terms(array(
+        'taxonomy' => $taxonomy,
+        'hide_empty' => false,
+    ));
+    if (is_wp_error($terms) || empty($terms)) {
+        return array();
+    }
+    return array_map(function ($term) {
+        return array(
+            'id' => (int) $term->term_id,
+            'name' => $term->name,
+        );
+    }, $terms);
+}
+
+function tec_rb_get_tag_taxonomy() {
+    if (class_exists('Tribe__Events__Main') && defined('Tribe__Events__Main::TAG_TAXONOMY')) {
+        return Tribe__Events__Main::TAG_TAXONOMY;
+    }
+
+    return 'post_tag';
+}
+
+function tec_rb_normalize_tags($event_tags) {
+    $tags = array();
+    if (is_array($event_tags)) {
+        $tags = $event_tags;
+    } elseif (is_string($event_tags)) {
+        $tags = explode(',', $event_tags);
+    }
+    $tags = array_filter(array_map('sanitize_text_field', array_map('trim', $tags)));
+    return array_values(array_unique($tags));
+}
+
+function tec_rb_resolve_tag_ids($tags, $taxonomy) {
+    $ids = array();
+    foreach ($tags as $tag) {
+        if ($tag === '') {
+            continue;
+        }
+        $existing = term_exists($tag, $taxonomy);
+        if (is_array($existing) && !empty($existing['term_id'])) {
+            $ids[] = (int) $existing['term_id'];
+            continue;
+        }
+        if (is_int($existing)) {
+            $ids[] = $existing;
+            continue;
+        }
+        $created = wp_insert_term($tag, $taxonomy);
+        if (!is_wp_error($created) && !empty($created['term_id'])) {
+            $ids[] = (int) $created['term_id'];
+        }
+    }
+    return array_values(array_unique(array_filter($ids)));
+}
+
+function tec_rb_get_series_list() {
+    if (!post_type_exists('tribe_event_series')) {
+        return array();
+    }
+    $series = get_posts(array(
+        'post_type' => 'tribe_event_series',
+        'post_status' => array('publish', 'private'),
+        'posts_per_page' => -1,
+        'orderby' => 'title',
+        'order' => 'ASC',
+        'no_found_rows' => true,
+    ));
+    return array_map(function ($series_item) {
+        return array(
+            'id' => (int) $series_item->ID,
+            'name' => $series_item->post_title,
+        );
+    }, $series);
+}
+
 function tec_rb_get_presets() {
     $raw = get_option('tec_rb_presets', '');
     if (is_array($raw)) {
@@ -81,6 +264,30 @@ function tec_rb_get_presets() {
         }
     }
     return array();
+}
+
+function tec_rb_get_default_options() {
+    $defaults = array(
+        'hide_from_listings' => false,
+        'sticky_in_month' => false,
+        'show_map_link' => true,
+        'show_attendees_list' => false,
+        'allow_comments' => false,
+        'feature_event' => false,
+        'event_website_enabled' => false,
+        'waitlist_mode' => 'none',
+    );
+    $stored = get_option('tec_rb_defaults', array());
+    if (is_string($stored) && $stored !== '') {
+        $decoded = json_decode($stored, true);
+        if (is_array($decoded)) {
+            $stored = $decoded;
+        }
+    }
+    if (!is_array($stored)) {
+        $stored = array();
+    }
+    return array_merge($defaults, $stored);
 }
 
 function tec_rb_normalize_created_post_id($value) {
@@ -142,7 +349,7 @@ function tec_rb_save_preset_handler() {
 add_action('wp_ajax_tec_rb_save_preset', 'tec_rb_save_preset_handler');
 
 function tec_rb_disable_admin_footer_on_page() {
-    // The Events Calendar adds its own footer copy; hide it on TEC.dog pages.
+    // The Events Calendar adds its own footer copy; hide it on TicketPup pages.
     add_filter('admin_footer_text', '__return_empty_string', 1000);
     add_filter('update_footer', '__return_empty_string', 1000);
 }
@@ -232,7 +439,7 @@ function tec_rb_render_admin_page() {
         return;
     }
     tec_rb_disable_admin_footer_on_page();
-    echo '<div class="wrap">';
+    echo '<div class="wrap tec-wrap">';
     echo tec_rb_render_form();
     echo '</div>';
 }
@@ -243,7 +450,7 @@ function tec_rb_render_debug_page() {
     }
     tec_rb_enqueue_assets();
     tec_rb_disable_admin_footer_on_page();
-    echo '<div class="wrap">';
+    echo '<div class="wrap tec-wrap">';
     include __DIR__ . '/templates/debug.php';
     echo '</div>';
 }
@@ -384,6 +591,55 @@ function tec_rb_build_instances($start_dt, $end_dt, $selected_days, $occurrences
     return $instances;
 }
 
+function tec_rb_parse_specific_dates($raw_dates, $timezone) {
+    if (empty($raw_dates) || !is_array($raw_dates)) {
+        return array();
+    }
+    $dates = array();
+    foreach ($raw_dates as $date) {
+        $date = trim((string) $date);
+        if ($date === '') {
+            continue;
+        }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            continue;
+        }
+        $dt = DateTime::createFromFormat('Y-m-d', $date, $timezone);
+        if (!$dt) {
+            continue;
+        }
+        $dates[] = $dt->format('Y-m-d');
+    }
+    $dates = array_values(array_unique($dates));
+    sort($dates);
+    return $dates;
+}
+
+function tec_rb_build_instances_from_dates($dates, $occurrences, $timezone) {
+    $instances = array();
+    if (empty($dates)) {
+        return $instances;
+    }
+    foreach ($dates as $date) {
+        foreach ($occurrences as $index => $occurrence) {
+            $occ_name = sanitize_text_field($occurrence['name'] ?? '');
+            $start_time_raw = sanitize_text_field($occurrence['startTime'] ?? '');
+            $end_time_raw = sanitize_text_field($occurrence['endTime'] ?? '');
+            $start_time = tec_rb_parse_time_to_24($start_time_raw, $timezone);
+            $end_time = tec_rb_parse_time_to_24($end_time_raw, $timezone);
+            $instances[] = array(
+                'date' => $date,
+                'start_time' => $start_time,
+                'end_time' => $end_time,
+                'occurrence_name' => $occ_name,
+                'occurrence_index' => $index + 1,
+                'start_datetime' => $date . ' ' . $start_time,
+            );
+        }
+    }
+    return $instances;
+}
+
 function tec_rb_find_events_handler() {
     check_ajax_referer('tec_rb_ajax', 'nonce');
     if (!current_user_can('edit_posts')) {
@@ -399,6 +655,9 @@ function tec_rb_find_events_handler() {
     $event_name = sanitize_text_field($payload['eventName'] ?? '');
     $start_date = sanitize_text_field($payload['startDate'] ?? '');
     $end_date = sanitize_text_field($payload['endDate'] ?? '');
+    $schedule_mode = sanitize_text_field($payload['scheduleMode'] ?? 'recurring');
+    $timezone = new DateTimeZone('America/New_York');
+    $specific_dates = tec_rb_parse_specific_dates($payload['specificDates'] ?? array(), $timezone);
     $recurrence_days = isset($payload['recurrenceDays']) && is_array($payload['recurrenceDays'])
         ? array_map('sanitize_text_field', $payload['recurrenceDays'])
         : array();
@@ -406,13 +665,25 @@ function tec_rb_find_events_handler() {
         ? $payload['occurrences']
         : array();
 
-    if ($event_name === '' || $start_date === '' || $end_date === '') {
-        wp_send_json_error(array('message' => 'Missing event name or date range.'));
+    if ($event_name === '') {
+        wp_send_json_error(array('message' => 'Missing event name.'));
     }
 
-    $timezone = new DateTimeZone('America/New_York');
-    $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
-    $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    $start_dt = null;
+    $end_dt = null;
+    if ($schedule_mode === 'specific') {
+        if (empty($specific_dates)) {
+            wp_send_json_error(array('message' => 'No specific dates were selected.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[0], $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[count($specific_dates) - 1], $timezone);
+    } else {
+        if ($start_date === '' || $end_date === '') {
+            wp_send_json_error(array('message' => 'Missing event date range.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    }
     if (!$start_dt || !$end_dt) {
         wp_send_json_error(array('message' => 'Invalid date range.'));
     }
@@ -434,25 +705,37 @@ function tec_rb_find_events_handler() {
     }
 
     $expected = array();
-    $cursor = clone $start_dt;
-    while ($cursor <= $end_dt) {
-        $day = (int) $cursor->format('w');
-        if (empty($selected_days) || in_array($day, $selected_days, true)) {
-            foreach ($occurrences as $index => $occurrence) {
-                $occ_name = sanitize_text_field($occurrence['name'] ?? '');
-                $start_time = sanitize_text_field($occurrence['startTime'] ?? '');
-                $start_time_24 = tec_rb_parse_time_to_24($start_time, $timezone);
-                $start_date_str = $cursor->format('Y-m-d');
-                $start_date_time = $start_date_str . ' ' . $start_time_24;
-                $expected[$start_date_time] = array(
-                    'date' => $start_date_str,
-                    'time' => $start_time_24,
-                    'occurrence' => $occ_name,
-                    'index' => $index + 1,
-                );
-            }
+    if ($schedule_mode === 'specific') {
+        $instances = tec_rb_build_instances_from_dates($specific_dates, $occurrences, $timezone);
+        foreach ($instances as $instance) {
+            $expected[$instance['start_datetime']] = array(
+                'date' => $instance['date'],
+                'time' => $instance['start_time'],
+                'occurrence' => $instance['occurrence_name'],
+                'index' => $instance['occurrence_index'],
+            );
         }
-        $cursor->modify('+1 day');
+    } else {
+        $cursor = clone $start_dt;
+        while ($cursor <= $end_dt) {
+            $day = (int) $cursor->format('w');
+            if (empty($selected_days) || in_array($day, $selected_days, true)) {
+                foreach ($occurrences as $index => $occurrence) {
+                    $occ_name = sanitize_text_field($occurrence['name'] ?? '');
+                    $start_time = sanitize_text_field($occurrence['startTime'] ?? '');
+                    $start_time_24 = tec_rb_parse_time_to_24($start_time, $timezone);
+                    $start_date_str = $cursor->format('Y-m-d');
+                    $start_date_time = $start_date_str . ' ' . $start_time_24;
+                    $expected[$start_date_time] = array(
+                        'date' => $start_date_str,
+                        'time' => $start_time_24,
+                        'occurrence' => $occ_name,
+                        'index' => $index + 1,
+                    );
+                }
+            }
+            $cursor->modify('+1 day');
+        }
     }
 
     if (empty($expected)) {
@@ -534,45 +817,78 @@ function tec_rb_dry_run_handler() {
     $event_name = sanitize_text_field($payload['eventName'] ?? '');
     $start_date = sanitize_text_field($payload['startDate'] ?? '');
     $end_date = sanitize_text_field($payload['endDate'] ?? '');
-    $venue_name = sanitize_text_field($payload['eventVenue'] ?? '');
-    $organizer_name = sanitize_text_field($payload['eventOrganizer'] ?? '');
-    $category_name = sanitize_text_field($payload['eventCategory'] ?? '');
+    $schedule_mode = sanitize_text_field($payload['scheduleMode'] ?? 'recurring');
+    $venue_value = sanitize_text_field($payload['eventVenue'] ?? '');
+    $organizer_value = sanitize_text_field($payload['eventOrganizer'] ?? '');
+    $category_value = sanitize_text_field($payload['eventCategory'] ?? '');
     $ticket_types = isset($payload['ticketTypes']) && is_array($payload['ticketTypes'])
         ? $payload['ticketTypes']
         : array();
     $shared_capacity = !empty($payload['sharedCapacity']) && count($ticket_types) > 1;
     $shared_capacity_total = isset($payload['sharedCapacityTotal']) ? (int) $payload['sharedCapacityTotal'] : 0;
 
-    if ($event_name === '' || $start_date === '' || $end_date === '') {
-        wp_send_json_error(array('message' => 'Missing event name or date range.'));
+    $timezone = new DateTimeZone('America/New_York');
+    $specific_dates = tec_rb_parse_specific_dates($payload['specificDates'] ?? array(), $timezone);
+
+    if ($event_name === '') {
+        wp_send_json_error(array('message' => 'Missing event name.'));
     }
 
-    $timezone = new DateTimeZone('America/New_York');
-    $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
-    $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    $start_dt = null;
+    $end_dt = null;
+    if ($schedule_mode === 'specific') {
+        if (empty($specific_dates)) {
+            wp_send_json_error(array('message' => 'No specific dates were selected.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[0], $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[count($specific_dates) - 1], $timezone);
+    } else {
+        if ($start_date === '' || $end_date === '') {
+            wp_send_json_error(array('message' => 'Missing event date range.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    }
     if (!$start_dt || !$end_dt) {
         wp_send_json_error(array('message' => 'Invalid date range.'));
     }
 
-    if ($venue_name !== '') {
-        $venue = tec_rb_find_post_by_title($venue_name, 'tribe_venue');
+    if ($venue_value !== '') {
+        $venue = null;
+        $venue_id = (int) $venue_value;
+        if ($venue_id) {
+            $venue = get_post($venue_id);
+        } else {
+            $venue = tec_rb_find_post_by_title($venue_value, 'tribe_venue');
+        }
         if (!$venue) {
-            wp_send_json_error(array('message' => 'Venue not found: ' . $venue_name));
+            wp_send_json_error(array('message' => 'Venue not found: ' . $venue_value));
         }
     }
 
-    if ($organizer_name !== '') {
-        $organizer = tec_rb_find_post_by_title($organizer_name, 'tribe_organizer');
+    if ($organizer_value !== '') {
+        $organizer = null;
+        $organizer_id = (int) $organizer_value;
+        if ($organizer_id) {
+            $organizer = get_post($organizer_id);
+        } else {
+            $organizer = tec_rb_find_post_by_title($organizer_value, 'tribe_organizer');
+        }
         if (!$organizer) {
-            wp_send_json_error(array('message' => 'Organizer not found: ' . $organizer_name));
+            wp_send_json_error(array('message' => 'Organizer not found: ' . $organizer_value));
         }
     }
 
     $category_taxonomy = class_exists('Tribe__Events__Main') ? Tribe__Events__Main::TAXONOMY : 'tribe_events_cat';
-    if ($category_name !== '') {
-        $category_id = tec_rb_find_term_id($category_name, $category_taxonomy);
+    if ($category_value !== '') {
+        $category_id = 0;
+        if (is_numeric($category_value)) {
+            $category_id = (int) $category_value;
+        } else {
+            $category_id = tec_rb_find_term_id($category_value, $category_taxonomy);
+        }
         if (!$category_id) {
-            wp_send_json_error(array('message' => 'Event category not found: ' . $category_name));
+            wp_send_json_error(array('message' => 'Event category not found: ' . $category_value));
         }
     }
 
@@ -610,7 +926,11 @@ function tec_rb_dry_run_handler() {
         }
     }
 
-    $instances = tec_rb_build_instances($start_dt, $end_dt, $selected_days, $occurrences, $timezone);
+    if ($schedule_mode === 'specific') {
+        $instances = tec_rb_build_instances_from_dates($specific_dates, $occurrences, $timezone);
+    } else {
+        $instances = tec_rb_build_instances($start_dt, $end_dt, $selected_days, $occurrences, $timezone);
+    }
     $event_count = count($instances);
     $ticket_count = $event_count * count($ticket_types);
 
@@ -966,6 +1286,135 @@ function tec_rb_finalize_woo_ticket($ticket_id, $show_description) {
     }
 }
 
+function tec_rb_abbreviate_name($name) {
+    $name = trim((string) $name);
+    if ($name === '') {
+        return 'EVT';
+    }
+    $parts = preg_split('/\s+/', $name);
+    $abbr = '';
+    foreach ($parts as $part) {
+        $clean = preg_replace('/[^A-Za-z0-9]/', '', $part);
+        if ($clean === '') {
+            continue;
+        }
+        $abbr .= strtoupper(substr($clean, 0, 1));
+        if (strlen($abbr) >= 4) {
+            break;
+        }
+    }
+    if ($abbr === '') {
+        $abbr = strtoupper(substr(sanitize_title($name), 0, 4));
+    }
+    return $abbr;
+}
+
+function tec_rb_generate_ticket_sku($event_name, $date, $time, $occurrence_name, $ticket_name, $index) {
+    $abbr = tec_rb_abbreviate_name($event_name);
+    $date_part = preg_replace('/[^0-9]/', '', (string) $date);
+    $time_part = preg_replace('/[^0-9]/', '', (string) $time);
+    $occ_part = $occurrence_name !== '' ? sanitize_title($occurrence_name) : 'occ-' . $index;
+    $ticket_part = $ticket_name !== '' ? sanitize_title($ticket_name) : 'ticket-' . $index;
+    $sku = strtoupper(trim("{$abbr}-{$date_part}-{$time_part}-{$occ_part}-{$ticket_part}", '-'));
+    $sku = preg_replace('/[^A-Z0-9\-]+/', '-', $sku);
+    $sku = trim($sku, '-');
+    return $sku;
+}
+
+function tec_rb_generate_unique_ticket_sku($ticket_id, $sku) {
+    $sku = trim((string) $sku);
+    if ($sku === '') {
+        return '';
+    }
+    if (function_exists('wc_product_generate_unique_sku')) {
+        $sku = wc_product_generate_unique_sku($ticket_id, $sku);
+        return $sku ?: '';
+    }
+    if (function_exists('wc_get_product_id_by_sku')) {
+        $existing = wc_get_product_id_by_sku($sku);
+        if ($existing && (int) $existing !== (int) $ticket_id) {
+            $sku = $sku . '-' . $ticket_id;
+        }
+    }
+    return $sku;
+}
+
+function tec_rb_get_ticket_category_id() {
+    if (!taxonomy_exists('product_cat')) {
+        return 0;
+    }
+    $term = get_term_by('slug', 'event-tickets', 'product_cat');
+    if ($term && !is_wp_error($term)) {
+        return (int) $term->term_id;
+    }
+    $created = wp_insert_term('Event Tickets', 'product_cat', array('slug' => 'event-tickets'));
+    if (is_wp_error($created)) {
+        return 0;
+    }
+    return (int) $created['term_id'];
+}
+
+function tec_rb_apply_ticket_product_meta($ticket_id, $event_name, $instance, $ticket, $index) {
+    if (!$ticket_id) {
+        return;
+    }
+    $current_sku = get_post_meta($ticket_id, '_sku', true);
+    if ($current_sku === '' || $current_sku === null) {
+        $sku = tec_rb_generate_ticket_sku(
+            $event_name,
+            $instance['date'] ?? '',
+            $instance['start_time'] ?? '',
+            $instance['occurrence_name'] ?? '',
+            $ticket['name'] ?? '',
+            $index
+        );
+        $sku = tec_rb_generate_unique_ticket_sku($ticket_id, $sku);
+        if ($sku !== '') {
+            update_post_meta($ticket_id, '_sku', $sku);
+        }
+    }
+
+    $category_id = tec_rb_get_ticket_category_id();
+    if ($category_id) {
+        wp_set_object_terms($ticket_id, array($category_id), 'product_cat', true);
+    }
+}
+
+function tec_rb_set_ticket_header_image($event_id, $attachment_id) {
+    if (!$event_id) {
+        return;
+    }
+    $attachment_id = (int) $attachment_id;
+    if ($attachment_id > 0) {
+        update_post_meta($event_id, '_tribe_ticket_header', $attachment_id);
+    } else {
+        delete_post_meta($event_id, '_tribe_ticket_header');
+    }
+}
+
+function tec_rb_assign_event_to_series($event_id, $series_id) {
+    $series_id = (int) $series_id;
+    if (!$event_id || !$series_id) {
+        return;
+    }
+    if (!class_exists('\\TEC\\Events_Pro\\Custom_Tables\\V1\\Series\\Relationship')) {
+        return;
+    }
+    if (!class_exists('\\TEC\\Events\\Custom_Tables\\V1\\Models\\Event')) {
+        return;
+    }
+    $event_model = \TEC\Events\Custom_Tables\V1\Models\Event::find($event_id, 'post_id');
+    if (!$event_model instanceof \TEC\Events\Custom_Tables\V1\Models\Event) {
+        return;
+    }
+    if (function_exists('tribe')) {
+        $relationship = tribe(\TEC\Events_Pro\Custom_Tables\V1\Series\Relationship::class);
+        if ($relationship && method_exists($relationship, 'with_event')) {
+            $relationship->with_event($event_model, array($series_id));
+        }
+    }
+}
+
 function tec_rb_get_event_ticket_ids($event_id, $provider) {
     if (!$event_id) {
         return array();
@@ -1258,18 +1707,23 @@ function tec_rb_create_events_tickets_handler() {
     $event_name = sanitize_text_field($payload['eventName'] ?? '');
     $start_date = sanitize_text_field($payload['startDate'] ?? '');
     $end_date = sanitize_text_field($payload['endDate'] ?? '');
+    $schedule_mode = sanitize_text_field($payload['scheduleMode'] ?? 'recurring');
     $event_excerpt = wp_kses_post($payload['eventExcerpt'] ?? '');
     $event_description = wp_kses_post($payload['eventDescription'] ?? '');
     $event_website = esc_url_raw($payload['eventWebsite'] ?? '');
-    $event_tags = sanitize_text_field($payload['eventTags'] ?? '');
-    $venue_name = sanitize_text_field($payload['eventVenue'] ?? '');
-    $organizer_name = sanitize_text_field($payload['eventOrganizer'] ?? '');
-    $category_name = sanitize_text_field($payload['eventCategory'] ?? '');
+    $event_tags = $payload['eventTags'] ?? ($payload['eventTagsRaw'] ?? '');
+    $venue_value = sanitize_text_field($payload['eventVenue'] ?? '');
+    $organizer_value = sanitize_text_field($payload['eventOrganizer'] ?? '');
+    $category_value = sanitize_text_field($payload['eventCategory'] ?? '');
+    $series_id = isset($payload['eventSeries']) ? (int) $payload['eventSeries'] : 0;
     $featured_image_url = esc_url_raw($payload['eventFeaturedImage'] ?? '');
     $show_map_link = !empty($payload['showMapLink']);
     $hide_from_listings = !empty($payload['hideFromListings']);
     $sticky_in_month = !empty($payload['stickyInMonthView']);
     $allow_comments = !empty($payload['allowComments']);
+    $show_attendees_list = !empty($payload['showAttendeesList']);
+    $feature_event = !empty($payload['featureEvent']);
+    $ticket_header_from_featured = !empty($payload['ticketHeaderFromFeatured']);
     $ticket_types = isset($payload['ticketTypes']) && is_array($payload['ticketTypes'])
         ? $payload['ticketTypes']
         : array();
@@ -1277,41 +1731,63 @@ function tec_rb_create_events_tickets_handler() {
     $shared_capacity_total = isset($payload['sharedCapacityTotal']) ? (int) $payload['sharedCapacityTotal'] : 0;
     $waitlist_mode = sanitize_text_field($payload['waitlistMode'] ?? 'none');
 
-    if ($event_name === '' || $start_date === '' || $end_date === '') {
-        wp_send_json_error(array('message' => 'Missing event name or date range.'));
+    $timezone = new DateTimeZone('America/New_York');
+    $specific_dates = tec_rb_parse_specific_dates($payload['specificDates'] ?? array(), $timezone);
+
+    if ($event_name === '') {
+        wp_send_json_error(array('message' => 'Missing event name.'));
     }
 
-    $timezone = new DateTimeZone('America/New_York');
-    $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
-    $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    $start_dt = null;
+    $end_dt = null;
+    if ($schedule_mode === 'specific') {
+        if (empty($specific_dates)) {
+            wp_send_json_error(array('message' => 'No specific dates were selected.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[0], $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[count($specific_dates) - 1], $timezone);
+    } else {
+        if ($start_date === '' || $end_date === '') {
+            wp_send_json_error(array('message' => 'Missing event date range.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    }
     if (!$start_dt || !$end_dt) {
         wp_send_json_error(array('message' => 'Invalid date range.'));
     }
 
-    if ($venue_name !== '') {
-        $venue = tec_rb_find_post_by_title($venue_name, 'tribe_venue');
-        if (!$venue) {
-            wp_send_json_error(array('message' => 'Venue not found: ' . $venue_name));
-        }
-    } else {
-        $venue = null;
+    $venue = null;
+    $venue_id = (int) $venue_value;
+    if ($venue_id) {
+        $venue = get_post($venue_id);
+    } elseif ($venue_value !== '') {
+        $venue = tec_rb_find_post_by_title($venue_value, 'tribe_venue');
+    }
+    if ($venue_value !== '' && !$venue) {
+        wp_send_json_error(array('message' => 'Venue not found: ' . $venue_value));
     }
 
-    if ($organizer_name !== '') {
-        $organizer = tec_rb_find_post_by_title($organizer_name, 'tribe_organizer');
-        if (!$organizer) {
-            wp_send_json_error(array('message' => 'Organizer not found: ' . $organizer_name));
-        }
-    } else {
-        $organizer = null;
+    $organizer = null;
+    $organizer_id = (int) $organizer_value;
+    if ($organizer_id) {
+        $organizer = get_post($organizer_id);
+    } elseif ($organizer_value !== '') {
+        $organizer = tec_rb_find_post_by_title($organizer_value, 'tribe_organizer');
+    }
+    if ($organizer_value !== '' && !$organizer) {
+        wp_send_json_error(array('message' => 'Organizer not found: ' . $organizer_value));
     }
 
     $category_taxonomy = class_exists('Tribe__Events__Main') ? Tribe__Events__Main::TAXONOMY : 'tribe_events_cat';
     $category_id = 0;
-    if ($category_name !== '') {
-        $category_id = tec_rb_find_term_id($category_name, $category_taxonomy);
+    if ($category_value !== '') {
+        $category_id = (int) $category_value;
         if (!$category_id) {
-            wp_send_json_error(array('message' => 'Event category not found: ' . $category_name));
+            $category_id = tec_rb_find_term_id($category_value, $category_taxonomy);
+        }
+        if (!$category_id) {
+            wp_send_json_error(array('message' => 'Event category not found: ' . $category_value));
         }
     }
 
@@ -1350,7 +1826,11 @@ function tec_rb_create_events_tickets_handler() {
         }
     }
 
-    $instances = tec_rb_build_instances($start_dt, $end_dt, $selected_days, $occurrences, $timezone);
+    if ($schedule_mode === 'specific') {
+        $instances = tec_rb_build_instances_from_dates($specific_dates, $occurrences, $timezone);
+    } else {
+        $instances = tec_rb_build_instances($start_dt, $end_dt, $selected_days, $occurrences, $timezone);
+    }
     if (empty($instances)) {
         wp_send_json_error(array('message' => 'No events were generated. Check recurrence days and occurrences.'));
     }
@@ -1430,12 +1910,47 @@ function tec_rb_create_events_tickets_handler() {
             wp_set_object_terms($event_id, array($category_id), $category_taxonomy, false);
         }
 
-        if ($event_tags !== '') {
-            $tags = array_filter(array_map('trim', explode(',', $event_tags)));
+        if (!empty($event_tags)) {
+            $tags = tec_rb_normalize_tags($event_tags);
             if (!empty($tags)) {
-                $tag_taxonomy = class_exists('Tribe__Events__Main') ? Tribe__Events__Main::TAG_TAXONOMY : 'post_tag';
-                wp_set_object_terms($event_id, $tags, $tag_taxonomy, false);
+                $tag_taxonomy = tec_rb_get_tag_taxonomy();
+                if (taxonomy_exists($tag_taxonomy) && is_object_in_taxonomy('tribe_events', $tag_taxonomy)) {
+                    $tag_ids = tec_rb_resolve_tag_ids($tags, $tag_taxonomy);
+                    if (!empty($tag_ids)) {
+                        wp_set_object_terms($event_id, $tag_ids, $tag_taxonomy, false);
+                    }
+                }
             }
+        }
+
+        if ($feature_event) {
+            update_post_meta($event_id, '_tribe_featured', 1);
+        } else {
+            delete_post_meta($event_id, '_tribe_featured');
+        }
+
+        if (class_exists('\\Tribe\\Tickets\\Events\\Attendees_List')) {
+            if ($show_attendees_list) {
+                delete_post_meta($event_id, \Tribe\Tickets\Events\Attendees_List::HIDE_META_KEY);
+            } else {
+                update_post_meta($event_id, \Tribe\Tickets\Events\Attendees_List::HIDE_META_KEY, 1);
+            }
+        } else {
+            if ($show_attendees_list) {
+                delete_post_meta($event_id, '_tribe_hide_attendees_list');
+            } else {
+                update_post_meta($event_id, '_tribe_hide_attendees_list', 1);
+            }
+        }
+
+        if ($ticket_header_from_featured) {
+            $header_image_id = get_post_thumbnail_id($event_id);
+            if (!$header_image_id && $featured_image_url !== '') {
+                $header_image_id = attachment_url_to_postid($featured_image_url);
+            }
+            tec_rb_set_ticket_header_image($event_id, $header_image_id);
+        } else {
+            tec_rb_set_ticket_header_image($event_id, 0);
         }
 
         $event_ids[] = $event_id;
@@ -1476,7 +1991,7 @@ function tec_rb_create_events_tickets_handler() {
                 update_post_meta($event_id, '_tribe_modified_fields', $modified_fields);
             }
 
-            foreach ($ticket_types as $ticket) {
+            foreach ($ticket_types as $ticket_index => $ticket) {
                 $args = tec_rb_build_ticket_args(
                     $provider,
                     $ticket,
@@ -1489,6 +2004,7 @@ function tec_rb_create_events_tickets_handler() {
                 $created_ticket = tribe_tickets($provider)->set_args($args)->create();
                 $ticket_id = tec_rb_normalize_created_post_id($created_ticket);
                 if ($ticket_id) {
+                    tec_rb_apply_ticket_product_meta($ticket_id, $event_name, $instance, $ticket, $ticket_index + 1);
                     $normalized_ticket_ids[] = $ticket_id;
                 }
             }
@@ -1544,6 +2060,9 @@ function tec_rb_create_events_tickets_handler() {
                 }
 
                 tec_rb_sync_custom_tables($event_id);
+                if ($series_id) {
+                    tec_rb_assign_event_to_series($event_id, $series_id);
+                }
             }
         }
 
@@ -1841,54 +2360,81 @@ function tec_rb_create_events_handler() {
     $event_name = sanitize_text_field($payload['eventName'] ?? '');
     $start_date = sanitize_text_field($payload['startDate'] ?? '');
     $end_date = sanitize_text_field($payload['endDate'] ?? '');
+    $schedule_mode = sanitize_text_field($payload['scheduleMode'] ?? 'recurring');
     $event_excerpt = wp_kses_post($payload['eventExcerpt'] ?? '');
     $event_description = wp_kses_post($payload['eventDescription'] ?? '');
     $event_website = esc_url_raw($payload['eventWebsite'] ?? '');
-    $event_tags = sanitize_text_field($payload['eventTags'] ?? '');
-    $venue_name = sanitize_text_field($payload['eventVenue'] ?? '');
-    $organizer_name = sanitize_text_field($payload['eventOrganizer'] ?? '');
-    $category_name = sanitize_text_field($payload['eventCategory'] ?? '');
+    $event_tags = $payload['eventTags'] ?? ($payload['eventTagsRaw'] ?? '');
+    $venue_value = sanitize_text_field($payload['eventVenue'] ?? '');
+    $organizer_value = sanitize_text_field($payload['eventOrganizer'] ?? '');
+    $category_value = sanitize_text_field($payload['eventCategory'] ?? '');
+    $series_id = isset($payload['eventSeries']) ? (int) $payload['eventSeries'] : 0;
     $featured_image_url = esc_url_raw($payload['eventFeaturedImage'] ?? '');
     $show_map_link = !empty($payload['showMapLink']);
     $hide_from_listings = !empty($payload['hideFromListings']);
     $sticky_in_month = !empty($payload['stickyInMonthView']);
     $allow_comments = !empty($payload['allowComments']);
-
-    if ($event_name === '' || $start_date === '' || $end_date === '') {
-        wp_send_json_error(array('message' => 'Missing event name or date range.'));
-    }
+    $show_attendees_list = !empty($payload['showAttendeesList']);
+    $feature_event = !empty($payload['featureEvent']);
+    $ticket_header_from_featured = !empty($payload['ticketHeaderFromFeatured']);
 
     $timezone = new DateTimeZone('America/New_York');
-    $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
-    $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    $specific_dates = tec_rb_parse_specific_dates($payload['specificDates'] ?? array(), $timezone);
+
+    if ($event_name === '') {
+        wp_send_json_error(array('message' => 'Missing event name.'));
+    }
+
+    $start_dt = null;
+    $end_dt = null;
+    if ($schedule_mode === 'specific') {
+        if (empty($specific_dates)) {
+            wp_send_json_error(array('message' => 'No specific dates were selected.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[0], $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $specific_dates[count($specific_dates) - 1], $timezone);
+    } else {
+        if ($start_date === '' || $end_date === '') {
+            wp_send_json_error(array('message' => 'Missing event date range.'));
+        }
+        $start_dt = DateTime::createFromFormat('Y-m-d', $start_date, $timezone);
+        $end_dt = DateTime::createFromFormat('Y-m-d', $end_date, $timezone);
+    }
     if (!$start_dt || !$end_dt) {
         wp_send_json_error(array('message' => 'Invalid date range.'));
     }
 
-    if ($venue_name !== '') {
-        $venue = tec_rb_find_post_by_title($venue_name, 'tribe_venue');
-        if (!$venue) {
-            wp_send_json_error(array('message' => 'Venue not found: ' . $venue_name));
-        }
-    } else {
-        $venue = null;
+    $venue = null;
+    $venue_id = (int) $venue_value;
+    if ($venue_id) {
+        $venue = get_post($venue_id);
+    } elseif ($venue_value !== '') {
+        $venue = tec_rb_find_post_by_title($venue_value, 'tribe_venue');
+    }
+    if ($venue_value !== '' && !$venue) {
+        wp_send_json_error(array('message' => 'Venue not found: ' . $venue_value));
     }
 
-    if ($organizer_name !== '') {
-        $organizer = tec_rb_find_post_by_title($organizer_name, 'tribe_organizer');
-        if (!$organizer) {
-            wp_send_json_error(array('message' => 'Organizer not found: ' . $organizer_name));
-        }
-    } else {
-        $organizer = null;
+    $organizer = null;
+    $organizer_id = (int) $organizer_value;
+    if ($organizer_id) {
+        $organizer = get_post($organizer_id);
+    } elseif ($organizer_value !== '') {
+        $organizer = tec_rb_find_post_by_title($organizer_value, 'tribe_organizer');
+    }
+    if ($organizer_value !== '' && !$organizer) {
+        wp_send_json_error(array('message' => 'Organizer not found: ' . $organizer_value));
     }
 
     $category_taxonomy = class_exists('Tribe__Events__Main') ? Tribe__Events__Main::TAXONOMY : 'tribe_events_cat';
     $category_id = 0;
-    if ($category_name !== '') {
-        $category_id = tec_rb_find_term_id($category_name, $category_taxonomy);
+    if ($category_value !== '') {
+        $category_id = (int) $category_value;
         if (!$category_id) {
-            wp_send_json_error(array('message' => 'Event category not found: ' . $category_name));
+            $category_id = tec_rb_find_term_id($category_value, $category_taxonomy);
+        }
+        if (!$category_id) {
+            wp_send_json_error(array('message' => 'Event category not found: ' . $category_value));
         }
     }
 
@@ -1919,50 +2465,55 @@ function tec_rb_create_events_handler() {
         }
     }
 
+    if ($schedule_mode === 'specific') {
+        $instances = tec_rb_build_instances_from_dates($specific_dates, $occurrences, $timezone);
+    } else {
+        $instances = tec_rb_build_instances($start_dt, $end_dt, $selected_days, $occurrences, $timezone);
+    }
+
+    if (empty($instances)) {
+        wp_send_json_error(array('message' => 'No events were generated. Check recurrence days and occurrences.'));
+    }
+
     $found = array();
     $missing = array();
-    $cursor = clone $start_dt;
-    while ($cursor <= $end_dt) {
-        $day = (int) $cursor->format('w');
-        if (empty($selected_days) || in_array($day, $selected_days, true)) {
-            foreach ($occurrences as $index => $occurrence) {
-                $occ_name = sanitize_text_field($occurrence['name'] ?? '');
-                $start_time_raw = sanitize_text_field($occurrence['startTime'] ?? '');
-                $end_time_raw = sanitize_text_field($occurrence['endTime'] ?? '');
-                $start_time = tec_rb_parse_time_to_24($start_time_raw, $timezone);
-                $end_time = tec_rb_parse_time_to_24($end_time_raw, $timezone);
-                $date = $cursor->format('Y-m-d');
+    foreach ($instances as $instance) {
+        $occ_name = sanitize_text_field($instance['occurrence_name'] ?? '');
+        $start_time = sanitize_text_field($instance['start_time'] ?? '');
+        $end_time = sanitize_text_field($instance['end_time'] ?? '');
+        $date = sanitize_text_field($instance['date'] ?? '');
+        $occ_index = (int) ($instance['occurrence_index'] ?? 1);
 
-                if ($start_time === '' || $end_time === '') {
-                    $missing[] = array('startDateTime' => $date . ' ' . $start_time);
-                    continue;
-                }
+        if ($start_time === '' || $end_time === '') {
+            $missing[] = array('startDateTime' => $date . ' ' . $start_time);
+            continue;
+        }
 
-                list($start_hour, $start_minute) = tec_rb_parse_time_parts($start_time);
-                list($end_hour, $end_minute) = tec_rb_parse_time_parts($end_time);
+        list($start_hour, $start_minute) = tec_rb_parse_time_parts($start_time);
+        list($end_hour, $end_minute) = tec_rb_parse_time_parts($end_time);
 
-                $slug = tec_rb_build_slug($event_name, $date, $start_time, $occ_name, $index + 1);
+        $slug = tec_rb_build_slug($event_name, $date, $start_time, $occ_name, $occ_index);
 
-                $event_args = array(
-                    'post_title' => $event_name,
-                    'post_content' => $event_description,
-                    'post_excerpt' => $event_excerpt,
-                    'post_status' => 'publish',
-                    'post_name' => $slug,
-                    'comment_status' => $allow_comments ? 'open' : 'closed',
-                    'ping_status' => 'closed',
-                    'menu_order' => $sticky_in_month ? -1 : 0,
-                    'EventAllDay' => false,
-                    'EventStartDate' => $date,
-                    'EventEndDate' => $date,
-                    'EventStartHour' => $start_hour,
-                    'EventStartMinute' => $start_minute,
-                    'EventEndHour' => $end_hour,
-                    'EventEndMinute' => $end_minute,
-                    'EventShowMapLink' => $show_map_link,
-                    'EventShowMap' => $show_map_link,
-                    'EventURL' => $event_website,
-                );
+        $event_args = array(
+            'post_title' => $event_name,
+            'post_content' => $event_description,
+            'post_excerpt' => $event_excerpt,
+            'post_status' => 'publish',
+            'post_name' => $slug,
+            'comment_status' => $allow_comments ? 'open' : 'closed',
+            'ping_status' => 'closed',
+            'menu_order' => $sticky_in_month ? -1 : 0,
+            'EventAllDay' => false,
+            'EventStartDate' => $date,
+            'EventEndDate' => $date,
+            'EventStartHour' => $start_hour,
+            'EventStartMinute' => $start_minute,
+            'EventEndHour' => $end_hour,
+            'EventEndMinute' => $end_minute,
+            'EventShowMapLink' => $show_map_link,
+            'EventShowMap' => $show_map_link,
+            'EventURL' => $event_website,
+        );
 
                 if ($hide_from_listings) {
                     $event_args['EventHideFromUpcoming'] = true;
@@ -1998,22 +2549,59 @@ function tec_rb_create_events_handler() {
                     wp_set_object_terms($event_id, array($category_id), $category_taxonomy, false);
                 }
 
-                if ($event_tags !== '') {
-                    $tags = array_filter(array_map('trim', explode(',', $event_tags)));
+                if (!empty($event_tags)) {
+                    $tags = tec_rb_normalize_tags($event_tags);
                     if (!empty($tags)) {
-                        $tag_taxonomy = class_exists('Tribe__Events__Main') ? Tribe__Events__Main::TAG_TAXONOMY : 'post_tag';
-                        wp_set_object_terms($event_id, $tags, $tag_taxonomy, false);
+                        $tag_taxonomy = tec_rb_get_tag_taxonomy();
+                        if (taxonomy_exists($tag_taxonomy) && is_object_in_taxonomy('tribe_events', $tag_taxonomy)) {
+                            $tag_ids = tec_rb_resolve_tag_ids($tags, $tag_taxonomy);
+                            if (!empty($tag_ids)) {
+                                wp_set_object_terms($event_id, $tag_ids, $tag_taxonomy, false);
+                            }
+                        }
                     }
                 }
 
-                $found[] = array(
-                    'id' => $event_id,
-                    'slug' => get_post_field('post_name', $event_id),
-                    'startDateTime' => $date . ' ' . $start_time,
-                );
-            }
-        }
-        $cursor->modify('+1 day');
+                if ($feature_event) {
+                    update_post_meta($event_id, '_tribe_featured', 1);
+                } else {
+                    delete_post_meta($event_id, '_tribe_featured');
+                }
+
+                if (class_exists('\\Tribe\\Tickets\\Events\\Attendees_List')) {
+                    if ($show_attendees_list) {
+                        delete_post_meta($event_id, \Tribe\Tickets\Events\Attendees_List::HIDE_META_KEY);
+                    } else {
+                        update_post_meta($event_id, \Tribe\Tickets\Events\Attendees_List::HIDE_META_KEY, 1);
+                    }
+                } else {
+                    if ($show_attendees_list) {
+                        delete_post_meta($event_id, '_tribe_hide_attendees_list');
+                    } else {
+                        update_post_meta($event_id, '_tribe_hide_attendees_list', 1);
+                    }
+                }
+
+                if ($ticket_header_from_featured) {
+                    $header_image_id = get_post_thumbnail_id($event_id);
+                    if (!$header_image_id && $featured_image_url !== '') {
+                        $header_image_id = attachment_url_to_postid($featured_image_url);
+                    }
+                    tec_rb_set_ticket_header_image($event_id, $header_image_id);
+                } else {
+                    tec_rb_set_ticket_header_image($event_id, 0);
+                }
+
+                if ($series_id) {
+                    tec_rb_sync_custom_tables($event_id);
+                    tec_rb_assign_event_to_series($event_id, $series_id);
+                }
+
+        $found[] = array(
+            'id' => $event_id,
+            'slug' => get_post_field('post_name', $event_id),
+            'startDateTime' => $date . ' ' . $start_time,
+        );
     }
 
     wp_send_json_success(array(
@@ -2048,18 +2636,18 @@ function tec_rb_get_menu_position() {
 
 function tec_rb_register_admin_pages() {
     add_menu_page(
-        'TEC.dog',
-        'TEC.dog',
+        'TicketPup',
+        'TicketPup',
         'edit_posts',
         'tec-recurring-bookings',
         'tec_rb_render_admin_page',
-        'dashicons-calendar-alt',
+        tec_rb_get_menu_icon(),
         tec_rb_get_menu_position()
     );
 
     add_submenu_page(
         'tec-recurring-bookings',
-        'TEC.dog Settings',
+        'TicketPup Settings',
         'Settings',
         'manage_options',
         'tec-recurring-bookings-settings',
@@ -2068,7 +2656,7 @@ function tec_rb_register_admin_pages() {
 
     add_submenu_page(
         'tec-recurring-bookings',
-        'TEC.dog Debug',
+        'TicketPup Debug',
         'Debug Compare',
         'manage_options',
         'tec-recurring-bookings-debug',
@@ -2085,9 +2673,6 @@ function tec_rb_render_settings_page() {
     tec_rb_disable_admin_footer_on_page();
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tec_rb_nonce']) && check_admin_referer('tec_rb_settings_save', 'tec_rb_nonce')) {
-        update_option('tec_rb_venues', sanitize_textarea_field(wp_unslash($_POST['tec_rb_venues'] ?? '')));
-        update_option('tec_rb_categories', sanitize_textarea_field(wp_unslash($_POST['tec_rb_categories'] ?? '')));
-        update_option('tec_rb_organizers', sanitize_textarea_field(wp_unslash($_POST['tec_rb_organizers'] ?? '')));
         $preset_names = $_POST['tec_rb_presets_name'] ?? array();
         $preset_data = $_POST['tec_rb_presets_data'] ?? array();
         $presets = array();
@@ -2113,6 +2698,22 @@ function tec_rb_render_settings_page() {
             );
         }
         update_option('tec_rb_presets', wp_json_encode($presets));
+        $waitlist_mode = isset($_POST['tec_rb_default_waitlist_mode']) ? sanitize_text_field(wp_unslash($_POST['tec_rb_default_waitlist_mode'])) : 'none';
+        $allowed_waitlist = array('none', 'presale_or_sold_out', 'before_sale', 'sold_out');
+        if (!in_array($waitlist_mode, $allowed_waitlist, true)) {
+            $waitlist_mode = 'none';
+        }
+        $defaults = array(
+            'hide_from_listings' => !empty($_POST['tec_rb_default_hide_from_listings']),
+            'sticky_in_month' => !empty($_POST['tec_rb_default_sticky_in_month']),
+            'show_map_link' => !empty($_POST['tec_rb_default_show_map_link']),
+            'show_attendees_list' => !empty($_POST['tec_rb_default_show_attendees_list']),
+            'allow_comments' => !empty($_POST['tec_rb_default_allow_comments']),
+            'feature_event' => !empty($_POST['tec_rb_default_feature_event']),
+            'event_website_enabled' => !empty($_POST['tec_rb_default_event_website']),
+            'waitlist_mode' => $waitlist_mode,
+        );
+        update_option('tec_rb_defaults', $defaults);
         if (!empty($preset_errors)) {
             echo '<div class="error"><p>' . implode('<br>', array_map('esc_html', array_unique($preset_errors))) . '</p></div>';
         } else {
@@ -2120,31 +2721,49 @@ function tec_rb_render_settings_page() {
         }
     }
 
-    $venues = esc_textarea(get_option('tec_rb_venues', ''));
-    $categories = esc_textarea(get_option('tec_rb_categories', ''));
-    $organizers = esc_textarea(get_option('tec_rb_organizers', ''));
     $presets = tec_rb_get_presets();
+    $defaults = tec_rb_get_default_options();
+    $venues_url = admin_url('edit.php?post_type=tribe_venue');
+    $organizers_url = admin_url('edit.php?post_type=tribe_organizer');
+    $categories_url = admin_url('edit-tags.php?taxonomy=tribe_events_cat&post_type=tribe_events');
+    $series_url = admin_url('edit.php?post_type=tribe_event_series');
     ?>
     <div class="wrap">
-        <h1>TEC.dog Settings</h1>
-        <p>Enter one value per line. These will be available in the form dropdowns.</p>
+        <h1>TicketPup Settings</h1>
+        <p>Venues, organizers, categories, and series are pulled directly from The Events Calendar.</p>
+        <p class="tec-inline">
+            <a class="button" href="<?php echo esc_url($venues_url); ?>">Manage Venues</a>
+            <a class="button" href="<?php echo esc_url($organizers_url); ?>">Manage Organizers</a>
+            <a class="button" href="<?php echo esc_url($categories_url); ?>">Manage Categories</a>
+            <a class="button" href="<?php echo esc_url($series_url); ?>">Manage Series</a>
+        </p>
         <form method="post">
             <?php wp_nonce_field('tec_rb_settings_save', 'tec_rb_nonce'); ?>
+            <h2>Default Options</h2>
+            <p>Set the default state of extra options and waitlist mode for new bookings.</p>
             <table class="form-table" role="presentation">
                 <tr>
-                    <th scope="row"><label for="tec_rb_venues">Venue Names</label></th>
-                    <td><textarea id="tec_rb_venues" name="tec_rb_venues" rows="6" class="large-text"><?php echo $venues; ?></textarea></td>
+                    <th scope="row">Extra Options</th>
+                    <td>
+                        <label><input type="checkbox" name="tec_rb_default_hide_from_listings" <?php checked(!empty($defaults['hide_from_listings'])); ?> /> Hide from event listings</label><br />
+                        <label><input type="checkbox" name="tec_rb_default_sticky_in_month" <?php checked(!empty($defaults['sticky_in_month'])); ?> /> Sticky in Month View</label><br />
+                        <label><input type="checkbox" name="tec_rb_default_show_map_link" <?php checked(!empty($defaults['show_map_link'])); ?> /> Show Map Link</label><br />
+                        <label><input type="checkbox" name="tec_rb_default_show_attendees_list" <?php checked(!empty($defaults['show_attendees_list'])); ?> /> Show attendees list on event page</label><br />
+                        <label><input type="checkbox" name="tec_rb_default_allow_comments" <?php checked(!empty($defaults['allow_comments'])); ?> /> Allow Comments</label><br />
+                        <label><input type="checkbox" name="tec_rb_default_feature_event" <?php checked(!empty($defaults['feature_event'])); ?> /> Feature this event</label><br />
+                        <label><input type="checkbox" name="tec_rb_default_event_website" <?php checked(!empty($defaults['event_website_enabled'])); ?> /> Add event website</label>
+                    </td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="tec_rb_categories">Event Categories</label></th>
-                    <td><textarea id="tec_rb_categories" name="tec_rb_categories" rows="6" class="large-text"><?php echo $categories; ?></textarea></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="tec_rb_organizers">Organizer Names</label></th>
-                    <td><textarea id="tec_rb_organizers" name="tec_rb_organizers" rows="6" class="large-text"><?php echo $organizers; ?></textarea></td>
+                    <th scope="row">Waitlist Default</th>
+                    <td>
+                        <label><input type="radio" name="tec_rb_default_waitlist_mode" value="none" <?php checked(($defaults['waitlist_mode'] ?? 'none') === 'none'); ?> /> No waitlist</label><br />
+                        <label><input type="radio" name="tec_rb_default_waitlist_mode" value="presale_or_sold_out" <?php checked(($defaults['waitlist_mode'] ?? 'none') === 'presale_or_sold_out'); ?> /> When tickets are on pre-sale or sold out</label><br />
+                        <label><input type="radio" name="tec_rb_default_waitlist_mode" value="before_sale" <?php checked(($defaults['waitlist_mode'] ?? 'none') === 'before_sale'); ?> /> Before tickets go on sale</label><br />
+                        <label><input type="radio" name="tec_rb_default_waitlist_mode" value="sold_out" <?php checked(($defaults['waitlist_mode'] ?? 'none') === 'sold_out'); ?> /> When tickets are sold out</label>
+                    </td>
                 </tr>
             </table>
-
             <h2>Presets</h2>
             <p>Create presets by pasting JSON built from the form payload. Each preset can be selected in the form dropdown.</p>
             <div id="tec-rb-presets">
