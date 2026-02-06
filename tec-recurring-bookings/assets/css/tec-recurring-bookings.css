@@ -28,10 +28,16 @@ body.toplevel_page_tec-recurring-bookings #wpcontent,
 body.ticketpack_page_tec-recurring-bookings #wpcontent,
 body.ticketpack_page_tec-recurring-bookings-settings #wpcontent,
 body.ticketpack_page_tec-recurring-bookings-debug #wpcontent,
+body.ticketpup_page_tec-recurring-bookings #wpcontent,
+body.ticketpup_page_tec-recurring-bookings-settings #wpcontent,
+body.ticketpup_page_tec-recurring-bookings-debug #wpcontent,
 body.toplevel_page_tec-recurring-bookings #wpbody-content,
 body.ticketpack_page_tec-recurring-bookings #wpbody-content,
 body.ticketpack_page_tec-recurring-bookings-settings #wpbody-content,
-body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
+body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content,
+body.ticketpup_page_tec-recurring-bookings #wpbody-content,
+body.ticketpup_page_tec-recurring-bookings-settings #wpbody-content,
+body.ticketpup_page_tec-recurring-bookings-debug #wpbody-content {
   padding-left: 0;
 }
 
@@ -131,6 +137,10 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
   padding: 0 24px 48px;
 }
 
+.tec-settings-content {
+  padding: 0 24px 48px;
+}
+
 .tec-title {
   font-size: 30px;
   font-weight: 700;
@@ -146,12 +156,24 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
   font-size: 20px;
   font-weight: 600;
   margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tec-section-title .dashicons {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .tec-section-desc {
   color: var(--tec-text-muted);
   margin: 0 0 16px;
   font-size: 14px;
+}
+
+.tec-schedule-mode {
+  margin-bottom: 16px;
 }
 
 .tec-subtitle {
@@ -185,9 +207,15 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
 }
 
 .tec-row-fields {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 16px;
+  grid-column: 1 / -1;
+  align-items: flex-start;
+}
+
+.tec-row-fields .tec-field {
+  width: min(220px, 100%);
 }
 
 .tec-row-fields .tec-select {
@@ -216,6 +244,10 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
 
 .tec-field--full {
   grid-column: 1 / -1;
+}
+
+.tec-field--tags {
+  width: 100%;
 }
 
 .tec-label-row {
@@ -484,8 +516,31 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
   padding-top: 16px;
 }
 
+.tec-occurrence-item + .tec-occurrence-item {
+  border-top: 1px solid var(--tec-border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
 .tec-schedule-mode {
   margin-bottom: 16px;
+}
+
+.tec-specific-calendar .ui-datepicker-multi {
+  padding: 15px;
+}
+
+.tec-specific-calendar .ui-datepicker th span {
+  color: var(--wp-admin-theme-color, #2271b1);
+}
+
+.tec-specific-calendar .ui-datepicker-other-month .ui-state-default {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#ui-datepicker-div {
+  display: none !important;
 }
 
 .tec-index .dashicons {
@@ -519,10 +574,35 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
 
 .tec-ticket-mid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 24px;
+  grid-template-columns: minmax(110px, 150px) max-content minmax(110px, 150px);
+  gap: 12px 16px;
   align-items: end;
+  justify-content: start;
   margin-top: 16px;
+}
+
+.tec-free-ticket {
+  align-self: end;
+  margin-top: 0;
+  margin-bottom: 4px;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.tec-field--compact .tec-control {
+  max-width: 160px;
+}
+
+.tec-ticket-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 24px;
+  margin-top: 12px;
+}
+
+.tec-ticket-extra .tec-field {
+  min-width: 240px;
 }
 
 .tec-ticket-top .tec-checkbox {
@@ -592,6 +672,20 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
 .tec-results ul {
   margin: 8px 0 0 18px;
   padding: 0;
+}
+
+.tec-build {
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--tec-text-muted);
+  text-align: right;
+}
+
+.tec-build--topbar {
+  margin-top: 0;
+  font-size: 12px;
+  color: var(--tec-text-muted);
+  white-space: nowrap;
 }
 
 .tec-results-list {
@@ -843,17 +937,18 @@ body.ticketpack_page_tec-recurring-bookings-debug #wpbody-content {
 
 .tec-tags-row {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  gap: 8px 12px;
   flex-wrap: wrap;
 }
 
 .tec-tags-row .tec-control {
-  flex: 0 0 240px;
+  flex: 0 0 220px;
 }
 
 .tec-tags-row .tec-tags-list {
-  flex: 1;
+  flex: 1 1 240px;
+  min-width: 0;
   min-height: 36px;
 }
 

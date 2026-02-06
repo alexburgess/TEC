@@ -11,28 +11,11 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
 ?>
 
 <div class="tec-app" data-tec-recurring-bookings>
-  <div class="tec-topbar">
-    <div class="tec-topbar-inner">
-      <div class="tec-topbar-left">
-        <span class="tec-logo" aria-hidden="true" style="width:36px;height:36px;display:inline-flex;overflow:hidden;color:#000;">
-          <?php echo tec_rb_get_header_logo_svg(); ?>
-        </span>
-        <h1 class="tec-title">TicketPup</h1>
-      </div>
-      <div class="tec-header-actions">
-        <div class="tec-control tec-control--select">
-          <select class="tec-select" data-preset-select>
-            <option value="">Select preset</option>
-          </select>
-        </div>
-        <button class="tec-button-secondary" type="button" data-save-preset>Save as preset</button>
-      </div>
-    </div>
-  </div>
+  <?php echo tec_rb_render_topbar('TicketPup', true); ?>
 
   <form class="tec-form">
   <section class="tec-section">
-    <p class="tec-section-title">Event Details</p>
+    <p class="tec-section-title"><span class="dashicons dashicons-edit" aria-hidden="true"></span>Event Details</p>
     <p class="tec-section-desc">Information about the event</p>
     <div class="tec-grid tec-grid--stack">
       <div class="tec-field tec-field--full">
@@ -152,8 +135,8 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
   <div class="tec-divider tec-divider--section"></div>
 
   <section class="tec-section">
-    <p class="tec-section-title">Extra Options</p>
-    <p class="tec-section-desc">Typically, you would leave these as default</p>
+    <p class="tec-section-title"><span class="dashicons dashicons-admin-tools" aria-hidden="true"></span>Additional Options</p>
+    <p class="tec-section-desc">You can set the global defaults for these options in settings.</p>
     <div class="tec-checkbox-group">
       <label class="tec-checkbox">
         <input type="checkbox" name="hide_from_listings" />
@@ -190,24 +173,24 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
   <div class="tec-divider tec-divider--section"></div>
 
   <section class="tec-section">
-    <p class="tec-section-title">Schedule &amp; Dates</p>
+    <p class="tec-section-title"><span class="dashicons dashicons-calendar-alt" aria-hidden="true"></span>Schedule &amp; Dates</p>
     <p class="tec-section-desc">Set range to create bookings, and its recurrences and occurrences</p>
 
     <div class="tec-field tec-schedule-mode">
       <p class="tec-label tec-subtitle">Schedule mode</p>
       <div class="tec-radio-group">
         <label class="tec-radio">
-          <input type="radio" name="schedule_mode" value="specific" />
+          <input type="radio" name="schedule_mode" value="specific" checked />
           <span>Create events for single or multiple specific dates</span>
         </label>
         <label class="tec-radio">
-          <input type="radio" name="schedule_mode" value="recurring" checked />
+          <input type="radio" name="schedule_mode" value="recurring" />
           <span>Create events for recurring dates</span>
         </label>
       </div>
     </div>
 
-    <div class="tec-field is-hidden" data-schedule-specific>
+    <div class="tec-field" data-schedule-specific>
       <p class="tec-label tec-subtitle">Select specific dates</p>
       <div class="tec-specific-picker">
         <div class="tec-specific-calendar" data-specific-calendar></div>
@@ -220,21 +203,21 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
       </div>
     </div>
 
-    <div class="tec-grid tec-grid--stack" data-schedule-recurring>
+    <div class="tec-grid tec-grid--stack is-hidden" data-schedule-recurring>
       <div class="tec-field">
         <p class="tec-label tec-subtitle">Dates to create bookings</p>
         <div class="tec-range">
           <div class="tec-field">
             <p class="tec-label">From</p>
             <div class="tec-control tec-control--date">
-              <input class="tec-input" name="event_date_from" type="text" inputmode="numeric" placeholder="YYYY-MM-DD" />
+              <input class="tec-input" name="event_date_from" type="date" />
             </div>
           </div>
           <span class="tec-range-arrow">→</span>
           <div class="tec-field">
             <p class="tec-label">To</p>
             <div class="tec-control tec-control--date">
-              <input class="tec-input" name="event_date_to" type="text" inputmode="numeric" placeholder="YYYY-MM-DD" />
+              <input class="tec-input" name="event_date_to" type="date" />
             </div>
           </div>
         </div>
@@ -275,7 +258,7 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
   <div class="tec-divider tec-divider--section"></div>
 
   <section class="tec-section">
-    <p class="tec-section-title">Ticketing</p>
+    <p class="tec-section-title"><span class="dashicons dashicons-tickets-alt" aria-hidden="true"></span>Ticketing</p>
     <p class="tec-section-desc">Set pricing &amp; sale schedules</p>
 
     <div class="tec-field">
@@ -329,7 +312,7 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
   <div class="tec-divider tec-divider--section"></div>
 
   <section class="tec-section">
-    <p class="tec-section-title">Create Events &amp; Tickets</p>
+    <p class="tec-section-title"><span class="dashicons dashicons-megaphone" aria-hidden="true"></span>Create Events &amp; Tickets</p>
     <p class="tec-section-desc">Run a dry preview, then create events and tickets directly in WordPress.</p>
     <div class="tec-inline">
       <button class="tec-button" type="button" data-create-events>Create Events &amp; Tickets 🐕💨</button>
@@ -339,7 +322,6 @@ $series_url = function_exists('admin_url') ? admin_url('edit.php?post_type=tribe
     <div class="tec-results" data-import-results></div>
   </section>
 
-  <div class="tec-divider tec-divider--section"></div>
   <div class="tec-modal" data-confirm-modal aria-hidden="true" hidden>
     <div class="tec-modal-card" role="dialog" aria-modal="true" aria-labelledby="tec-modal-title">
       <h3 class="tec-modal-title" id="tec-modal-title">Delete last batch?</h3>

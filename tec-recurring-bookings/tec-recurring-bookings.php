@@ -12,6 +12,94 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+function tec_rb_get_build_timezone() {
+    $timezone = function_exists('wp_timezone') ? wp_timezone() : null;
+    if ($timezone instanceof DateTimeZone) {
+        $name = $timezone->getName();
+        if (!empty($name) && $name !== 'UTC') {
+            return $timezone;
+        }
+    }
+    $tz_string = get_option('timezone_string');
+    if (!empty($tz_string) && $tz_string !== 'UTC') {
+        try {
+            return new DateTimeZone($tz_string);
+        } catch (Exception $e) {
+            // fall through
+        }
+    }
+    $offset = get_option('gmt_offset', 0);
+    if (is_numeric($offset) && (float) $offset !== 0.0) {
+        $hours = (int) $offset;
+        $minutes = (int) round(abs($offset - $hours) * 60);
+        $sign = $offset >= 0 ? '+' : '-';
+        $tz_name = sprintf('%s%02d:%02d', $sign, abs($hours), $minutes);
+        try {
+            return new DateTimeZone($tz_name);
+        } catch (Exception $e) {
+            // fall through
+        }
+    }
+    return new DateTimeZone('America/New_York');
+}
+
+function tec_rb_get_build_info() {
+    $timestamp = file_exists(__FILE__) ? filemtime(__FILE__) : time();
+    $timezone = tec_rb_get_build_timezone();
+    if (function_exists('wp_date')) {
+        return array(
+            'build' => wp_date('YmdHis', $timestamp, $timezone),
+            'built_at' => wp_date('Y-m-d H:i:s T', $timestamp, $timezone),
+        );
+    }
+    $dt = new DateTime('@' . $timestamp);
+    $dt->setTimezone($timezone);
+    return array(
+        'build' => $dt->format('YmdHis'),
+        'built_at' => $dt->format('Y-m-d H:i:s T'),
+    );
+}
+
+function tec_rb_render_build_footer() {
+    $info = tec_rb_get_build_info();
+    $build = esc_html($info['build']);
+    $built_at = esc_html($info['built_at']);
+    return '<div class="tec-build tec-build--footer">Build ' . $build . ' · Built ' . $built_at . '</div>';
+}
+
+function tec_rb_render_topbar($title, $show_presets = false, $show_build = false) {
+    $build_info = $show_build ? tec_rb_get_build_info() : null;
+    ob_start();
+    ?>
+    <div class="tec-topbar">
+      <div class="tec-topbar-inner">
+        <div class="tec-topbar-left">
+          <span class="tec-logo" aria-hidden="true" style="width:36px;height:36px;display:inline-flex;overflow:hidden;color:#000;">
+            <?php echo tec_rb_get_header_logo_svg(); ?>
+          </span>
+          <h1 class="tec-title"><?php echo esc_html($title); ?></h1>
+        </div>
+        <?php if ($show_presets || $show_build) : ?>
+          <div class="tec-header-actions">
+            <?php if ($show_presets) : ?>
+              <div class="tec-control tec-control--select">
+                <select class="tec-select" data-preset-select>
+                  <option value="">Select preset</option>
+                </select>
+              </div>
+              <button class="tec-button-secondary" type="button" data-save-preset>Save as preset</button>
+            <?php endif; ?>
+            <?php if ($show_build && $build_info) : ?>
+              <div class="tec-build tec-build--topbar">Build <?php echo esc_html($build_info['build']); ?> · <?php echo esc_html($build_info['built_at']); ?></div>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
 function tec_rb_enqueue_assets() {
     $base_url = plugin_dir_url(__FILE__);
     $css_path = __DIR__ . '/assets/css/tec-recurring-bookings.css';
@@ -51,6 +139,9 @@ function tec_rb_enqueue_assets() {
             'nonce' => wp_create_nonce('tec_rb_ajax'),
             'presets' => tec_rb_get_presets(),
             'defaults' => tec_rb_get_default_options(),
+            'ticketNameSuggestions' => tec_rb_get_ticket_name_suggestions(),
+            'attendeeQuestions' => tec_rb_get_attendee_questions(),
+            'attendeeQuestionPresets' => tec_rb_get_attendee_question_presets(),
         )
     );
 }
@@ -139,6 +230,32 @@ function tec_rb_get_option_list($key, $fallback = array()) {
     return tec_rb_parse_list($value, $fallback);
 }
 
+function tec_rb_get_ticket_name_suggestions() {
+    return tec_rb_get_option_list('tec_rb_ticket_name_suggestions', array());
+}
+
+function tec_rb_get_attendee_questions() {
+    $questions = get_option('tec_rb_attendee_questions', array());
+    if (is_string($questions)) {
+        $decoded = json_decode($questions, true);
+        if (is_array($decoded)) {
+            $questions = $decoded;
+        }
+    }
+    return is_array($questions) ? $questions : array();
+}
+
+function tec_rb_get_attendee_question_presets() {
+    $presets = get_option('tec_rb_attendee_question_presets', array());
+    if (is_string($presets)) {
+        $decoded = json_decode($presets, true);
+        if (is_array($decoded)) {
+            $presets = $decoded;
+        }
+    }
+    return is_array($presets) ? $presets : array();
+}
+
 function tec_rb_get_venues_list() {
     $venues = get_posts(array(
         'post_type' => 'tribe_venue',
@@ -205,7 +322,11 @@ function tec_rb_normalize_tags($event_tags) {
     } elseif (is_string($event_tags)) {
         $tags = explode(',', $event_tags);
     }
-    $tags = array_filter(array_map('sanitize_text_field', array_map('trim', $tags)));
+    $tags = array_filter($tags, 'is_scalar');
+    $tags = array_map('strval', $tags);
+    $tags = array_map('trim', $tags);
+    $tags = array_filter($tags, 'strlen');
+    $tags = array_map('sanitize_text_field', $tags);
     return array_values(array_unique($tags));
 }
 
@@ -230,6 +351,31 @@ function tec_rb_resolve_tag_ids($tags, $taxonomy) {
         }
     }
     return array_values(array_unique(array_filter($ids)));
+}
+
+function tec_rb_assign_event_tags($event_id, $event_tags, &$errors = null) {
+    if (empty($event_id) || empty($event_tags)) {
+        return;
+    }
+    $tags = tec_rb_normalize_tags($event_tags);
+    if (empty($tags)) {
+        return;
+    }
+    $tag_taxonomy = tec_rb_get_tag_taxonomy();
+    if (!taxonomy_exists($tag_taxonomy)) {
+        return;
+    }
+    if (!is_object_in_taxonomy('tribe_events', $tag_taxonomy)) {
+        register_taxonomy_for_object_type($tag_taxonomy, 'tribe_events');
+    }
+    $tag_ids = tec_rb_resolve_tag_ids($tags, $tag_taxonomy);
+    if (empty($tag_ids)) {
+        return;
+    }
+    $result = wp_set_object_terms($event_id, $tag_ids, $tag_taxonomy, false);
+    if (is_wp_error($result) && is_array($errors)) {
+        $errors[] = 'Tags could not be assigned: ' . $result->get_error_message();
+    }
 }
 
 function tec_rb_get_series_list() {
@@ -276,6 +422,8 @@ function tec_rb_get_default_options() {
         'feature_event' => false,
         'event_website_enabled' => false,
         'waitlist_mode' => 'none',
+        'attendee_collection' => 'none',
+        'attendee_collection_preset' => '',
     );
     $stored = get_option('tec_rb_defaults', array());
     if (is_string($stored) && $stored !== '') {
@@ -827,6 +975,48 @@ function tec_rb_dry_run_handler() {
     $shared_capacity = !empty($payload['sharedCapacity']) && count($ticket_types) > 1;
     $shared_capacity_total = isset($payload['sharedCapacityTotal']) ? (int) $payload['sharedCapacityTotal'] : 0;
 
+    if (!empty($ticket_types)) {
+        foreach ($ticket_types as &$ticket) {
+            $is_free = !empty($ticket['isFree']);
+            $price_raw = isset($ticket['price']) ? trim((string) $ticket['price']) : '';
+            if ($price_raw === '' && !$is_free) {
+                wp_send_json_error(array('message' => 'Ticket price is required unless the ticket is marked free.'));
+            }
+            if ($is_free && $price_raw === '') {
+                $ticket['price'] = '0';
+            }
+        }
+        unset($ticket);
+    }
+    $attendee_presets = tec_rb_get_attendee_question_presets();
+    $has_attendee_presets = !empty($attendee_presets);
+    foreach ($ticket_types as $ticket) {
+        $collection = sanitize_text_field($ticket['attendeeCollection'] ?? 'none');
+        $preset_key = isset($ticket['attendeePreset']) ? trim((string) $ticket['attendeePreset']) : '';
+        if ($collection !== 'none') {
+            if (!$has_attendee_presets) {
+                wp_send_json_error(array('message' => 'Attendee collection requires at least one attendee question preset.'));
+            }
+            if ($preset_key === '') {
+                wp_send_json_error(array('message' => 'Select an attendee question preset for tickets with attendee collection enabled.'));
+            }
+        }
+    }
+    $attendee_presets = tec_rb_get_attendee_question_presets();
+    $has_attendee_presets = !empty($attendee_presets);
+    foreach ($ticket_types as $ticket) {
+        $collection = sanitize_text_field($ticket['attendeeCollection'] ?? 'none');
+        $preset_key = isset($ticket['attendeePreset']) ? trim((string) $ticket['attendeePreset']) : '';
+        if ($collection !== 'none') {
+            if (!$has_attendee_presets) {
+                wp_send_json_error(array('message' => 'Attendee collection requires at least one attendee question preset.'));
+            }
+            if ($preset_key === '') {
+                wp_send_json_error(array('message' => 'Select an attendee question preset for tickets with attendee collection enabled.'));
+            }
+        }
+    }
+
     $timezone = new DateTimeZone('America/New_York');
     $specific_dates = tec_rb_parse_specific_dates($payload['specificDates'] ?? array(), $timezone);
 
@@ -960,16 +1150,36 @@ function tec_rb_dry_run_handler() {
 
 add_action('wp_ajax_tec_rb_dry_run', 'tec_rb_dry_run_handler');
 
-function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt, $timezone, $shared_capacity = false, $shared_capacity_level = 0) {
+function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt, $timezone, $shared_capacity = false, $shared_capacity_level = 0, $attendee_questions = array()) {
     $name = sanitize_text_field($ticket['name'] ?? '');
     if ($name === '') {
         $name = 'Ticket';
     }
     $description = wp_kses_post($ticket['description'] ?? '');
     $price = tec_rb_parse_price($ticket['price'] ?? '');
+    $is_free = !empty($ticket['isFree']);
+    if ($is_free) {
+        $price = 0;
+    }
     $quantity = trim((string) ($ticket['quantity'] ?? ''));
     $capacity = $quantity === '' ? -1 : max(0, (int) $quantity);
     $show_description = !empty($ticket['showDescription']);
+    $attendee_mode_raw = sanitize_text_field($ticket['attendeeCollection'] ?? 'none');
+    $attendee_mode = in_array($attendee_mode_raw, array('none', 'allow', 'require'), true) ? $attendee_mode_raw : 'none';
+    $iac_value = $attendee_mode === 'allow' ? 'allowed' : ($attendee_mode === 'require' ? 'required' : 'none');
+    if (!empty($attendee_questions) && is_array($attendee_questions)) {
+        $attendee_questions = array_values($attendee_questions);
+        foreach ($attendee_questions as $idx => &$question) {
+            if (!is_array($question)) {
+                continue;
+            }
+            if (!isset($question['field_order'])) {
+                $question['field_order'] = $idx;
+            }
+        }
+        unset($question);
+    }
+    $use_attendee_questions = $iac_value !== 'none' && !empty($attendee_questions);
 
     $sale_start_mode = sanitize_text_field($ticket['saleStartMode'] ?? 'immediate');
     $sale_start_date = sanitize_text_field($ticket['saleStartDate'] ?? '');
@@ -1066,8 +1276,9 @@ function tec_rb_build_ticket_args($provider, $ticket, $event_id, $event_start_dt
             'excerpt' => $description,
             '_sku' => '',
             '_type' => 'default',
-            '_tribe_tickets_ar_iac' => 'required',
-            '_tribe_tickets_meta' => array(),
+            '_tribe_tickets_ar_iac' => $iac_value,
+            '_tribe_tickets_meta' => $use_attendee_questions ? $attendee_questions : array(),
+            '_tribe_tickets_meta_enabled' => $use_attendee_questions ? 'yes' : 'no',
             'total_sales' => 0,
             '_tax_status' => 'taxable',
             '_tax_class' => '',
@@ -1267,8 +1478,19 @@ function tec_rb_finalize_woo_ticket($ticket_id, $show_description) {
     }
 
     update_post_meta($ticket_id, '_type', 'default');
-    update_post_meta($ticket_id, '_tribe_tickets_ar_iac', 'required');
-    update_post_meta($ticket_id, '_tribe_tickets_meta', array());
+    $existing_iac = get_post_meta($ticket_id, '_tribe_tickets_ar_iac', true);
+    if ($existing_iac === '') {
+        update_post_meta($ticket_id, '_tribe_tickets_ar_iac', 'required');
+    }
+    $existing_meta = get_post_meta($ticket_id, '_tribe_tickets_meta', true);
+    if ($existing_meta === '') {
+        update_post_meta($ticket_id, '_tribe_tickets_meta', array());
+    }
+    $existing_meta_enabled = get_post_meta($ticket_id, '_tribe_tickets_meta_enabled', true);
+    if ($existing_meta_enabled === '') {
+        $has_meta = is_array($existing_meta) ? !empty($existing_meta) : false;
+        update_post_meta($ticket_id, '_tribe_tickets_meta_enabled', $has_meta ? 'yes' : 'no');
+    }
     update_post_meta($ticket_id, '_tribe_ticket_show_description', $show_description ? 'yes' : 'no');
     update_post_meta($ticket_id, '_tribe_ticket_version', defined('TRIBE_TICKETS_VERSION') ? TRIBE_TICKETS_VERSION : '5.27.4');
     update_post_meta($ticket_id, '_tax_status', 'taxable');
@@ -1724,12 +1946,32 @@ function tec_rb_create_events_tickets_handler() {
     $show_attendees_list = !empty($payload['showAttendeesList']);
     $feature_event = !empty($payload['featureEvent']);
     $ticket_header_from_featured = !empty($payload['ticketHeaderFromFeatured']);
+    if ($feature_event) {
+        $sticky_in_month = true;
+    }
+    if ($feature_event) {
+        $sticky_in_month = true;
+    }
     $ticket_types = isset($payload['ticketTypes']) && is_array($payload['ticketTypes'])
         ? $payload['ticketTypes']
         : array();
     $shared_capacity = !empty($payload['sharedCapacity']) && count($ticket_types) > 1;
     $shared_capacity_total = isset($payload['sharedCapacityTotal']) ? (int) $payload['sharedCapacityTotal'] : 0;
     $waitlist_mode = sanitize_text_field($payload['waitlistMode'] ?? 'none');
+
+    if (!empty($ticket_types)) {
+        foreach ($ticket_types as &$ticket) {
+            $is_free = !empty($ticket['isFree']);
+            $price_raw = isset($ticket['price']) ? trim((string) $ticket['price']) : '';
+            if ($price_raw === '' && !$is_free) {
+                wp_send_json_error(array('message' => 'Ticket price is required unless the ticket is marked free.'));
+            }
+            if ($is_free && $price_raw === '') {
+                $ticket['price'] = '0';
+            }
+        }
+        unset($ticket);
+    }
 
     $timezone = new DateTimeZone('America/New_York');
     $specific_dates = tec_rb_parse_specific_dates($payload['specificDates'] ?? array(), $timezone);
@@ -1837,6 +2079,7 @@ function tec_rb_create_events_tickets_handler() {
 
     $found = array();
     $missing = array();
+    $errors = array();
     $event_ids = array();
     $ticket_ids = array();
     $event_costs_input = tec_rb_collect_ticket_prices_from_input($ticket_types);
@@ -1911,16 +2154,7 @@ function tec_rb_create_events_tickets_handler() {
         }
 
         if (!empty($event_tags)) {
-            $tags = tec_rb_normalize_tags($event_tags);
-            if (!empty($tags)) {
-                $tag_taxonomy = tec_rb_get_tag_taxonomy();
-                if (taxonomy_exists($tag_taxonomy) && is_object_in_taxonomy('tribe_events', $tag_taxonomy)) {
-                    $tag_ids = tec_rb_resolve_tag_ids($tags, $tag_taxonomy);
-                    if (!empty($tag_ids)) {
-                        wp_set_object_terms($event_id, $tag_ids, $tag_taxonomy, false);
-                    }
-                }
-            }
+            tec_rb_assign_event_tags($event_id, $event_tags, $errors);
         }
 
         if ($feature_event) {
@@ -1957,6 +2191,7 @@ function tec_rb_create_events_tickets_handler() {
         $event_ticket_ids = array();
 
         if (!empty($ticket_types) && $provider !== '') {
+            $attendee_presets = tec_rb_get_attendee_question_presets();
             $event_start_dt = DateTime::createFromFormat('Y-m-d H:i:s', $instance['start_datetime'], $timezone);
             $created_for_event = 0;
             $global_stock_level = $shared_capacity ? tec_rb_calculate_shared_capacity($ticket_types) : 0;
@@ -1992,6 +2227,14 @@ function tec_rb_create_events_tickets_handler() {
             }
 
             foreach ($ticket_types as $ticket_index => $ticket) {
+                $ticket_preset_key = isset($ticket['attendeePreset']) ? trim((string) $ticket['attendeePreset']) : '';
+                $ticket_questions = array();
+                if ($ticket_preset_key !== '') {
+                    $preset_index = (int) $ticket_preset_key;
+                    if (isset($attendee_presets[$preset_index]['questions']) && is_array($attendee_presets[$preset_index]['questions'])) {
+                        $ticket_questions = $attendee_presets[$preset_index]['questions'];
+                    }
+                }
                 $args = tec_rb_build_ticket_args(
                     $provider,
                     $ticket,
@@ -1999,7 +2242,8 @@ function tec_rb_create_events_tickets_handler() {
                     $event_start_dt,
                     $timezone,
                     ($shared_capacity && $global_stock_level > 0),
-                    $global_stock_level
+                    $global_stock_level,
+                    $ticket_questions
                 );
                 $created_ticket = tribe_tickets($provider)->set_args($args)->create();
                 $ticket_id = tec_rb_normalize_created_post_id($created_ticket);
@@ -2085,7 +2329,7 @@ function tec_rb_create_events_tickets_handler() {
     wp_send_json_success(array(
         'found' => $found,
         'missing' => $missing,
-        'errors' => array(),
+        'errors' => $errors,
         'summary' => 'events created.',
         'eventCount' => count($found),
         'ticketCount' => count($ticket_ids),
@@ -2549,18 +2793,9 @@ function tec_rb_create_events_handler() {
                     wp_set_object_terms($event_id, array($category_id), $category_taxonomy, false);
                 }
 
-                if (!empty($event_tags)) {
-                    $tags = tec_rb_normalize_tags($event_tags);
-                    if (!empty($tags)) {
-                        $tag_taxonomy = tec_rb_get_tag_taxonomy();
-                        if (taxonomy_exists($tag_taxonomy) && is_object_in_taxonomy('tribe_events', $tag_taxonomy)) {
-                            $tag_ids = tec_rb_resolve_tag_ids($tags, $tag_taxonomy);
-                            if (!empty($tag_ids)) {
-                                wp_set_object_terms($event_id, $tag_ids, $tag_taxonomy, false);
-                            }
-                        }
-                    }
-                }
+        if (!empty($event_tags)) {
+            tec_rb_assign_event_tags($event_id, $event_tags);
+        }
 
                 if ($feature_event) {
                     update_post_meta($event_id, '_tribe_featured', 1);
@@ -2655,7 +2890,7 @@ function tec_rb_register_admin_pages() {
     );
 
     add_submenu_page(
-        'tec-recurring-bookings',
+        null,
         'TicketPup Debug',
         'Debug Compare',
         'manage_options',
@@ -2670,6 +2905,7 @@ function tec_rb_render_settings_page() {
     if (!current_user_can('manage_options')) {
         return;
     }
+    tec_rb_enqueue_assets();
     tec_rb_disable_admin_footer_on_page();
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tec_rb_nonce']) && check_admin_referer('tec_rb_settings_save', 'tec_rb_nonce')) {
@@ -2712,8 +2948,94 @@ function tec_rb_render_settings_page() {
             'feature_event' => !empty($_POST['tec_rb_default_feature_event']),
             'event_website_enabled' => !empty($_POST['tec_rb_default_event_website']),
             'waitlist_mode' => $waitlist_mode,
+            'attendee_collection' => isset($_POST['tec_rb_default_attendee_collection']) ? sanitize_text_field(wp_unslash($_POST['tec_rb_default_attendee_collection'])) : 'none',
+            'attendee_collection_preset' => isset($_POST['tec_rb_default_attendee_preset']) ? sanitize_text_field(wp_unslash($_POST['tec_rb_default_attendee_preset'])) : '',
         );
         update_option('tec_rb_defaults', $defaults);
+
+        $ticket_suggestions_raw = isset($_POST['tec_rb_ticket_name_suggestions']) ? wp_unslash($_POST['tec_rb_ticket_name_suggestions']) : '';
+        $ticket_suggestions = tec_rb_parse_list($ticket_suggestions_raw, array());
+        update_option('tec_rb_ticket_name_suggestions', implode("\n", $ticket_suggestions));
+
+        $question_labels = isset($_POST['tec_rb_question_label']) ? (array) wp_unslash($_POST['tec_rb_question_label']) : array();
+        $question_types = isset($_POST['tec_rb_question_type']) ? (array) wp_unslash($_POST['tec_rb_question_type']) : array();
+        $question_required = isset($_POST['tec_rb_question_required']) ? (array) wp_unslash($_POST['tec_rb_question_required']) : array();
+        $question_placeholders = isset($_POST['tec_rb_question_placeholder']) ? (array) wp_unslash($_POST['tec_rb_question_placeholder']) : array();
+        $question_descriptions = isset($_POST['tec_rb_question_description']) ? (array) wp_unslash($_POST['tec_rb_question_description']) : array();
+        $question_options = isset($_POST['tec_rb_question_options']) ? (array) wp_unslash($_POST['tec_rb_question_options']) : array();
+        $question_multiline = isset($_POST['tec_rb_question_multiline']) ? (array) wp_unslash($_POST['tec_rb_question_multiline']) : array();
+
+        $allowed_question_types = array('text', 'email', 'telephone', 'url', 'date', 'select', 'radio', 'checkbox');
+        $attendee_questions = array();
+        foreach ($question_labels as $index => $label_raw) {
+            $label = sanitize_text_field($label_raw);
+            if ($label === '') {
+                continue;
+            }
+            $type = isset($question_types[$index]) ? sanitize_text_field($question_types[$index]) : 'text';
+            if (in_array($type, array('birth', 'datetime'), true)) {
+                $type = 'date';
+            }
+            if (!in_array($type, $allowed_question_types, true)) {
+                $type = 'text';
+            }
+            $required = !empty($question_required[$index]) ? 'on' : '';
+            $placeholder = isset($question_placeholders[$index]) ? sanitize_text_field($question_placeholders[$index]) : '';
+            $description = isset($question_descriptions[$index]) ? sanitize_textarea_field($question_descriptions[$index]) : '';
+            $options_raw = isset($question_options[$index]) ? $question_options[$index] : '';
+            $options = array();
+            if (in_array($type, array('radio', 'checkbox', 'select'), true)) {
+                $options = array_values(array_filter(array_map('sanitize_text_field', array_map('trim', preg_split('/\r\n|\r|\n|,/', (string) $options_raw)))));
+            }
+            $extra = array();
+            if ($type === 'text' && !empty($question_multiline[$index])) {
+                $extra['multiline'] = 'yes';
+            }
+            if (!empty($options)) {
+                $extra['options'] = $options;
+            }
+
+            $field_order = count($attendee_questions);
+            $attendee_questions[] = array(
+                'id' => 0,
+                'type' => $type,
+                'required' => $required,
+                'label' => $label,
+                'slug' => sanitize_title($label),
+                'extra' => $extra,
+                'classes' => array(),
+                'attributes' => array(),
+                'placeholder' => $placeholder,
+                'description' => $description,
+                'field_order' => $field_order,
+            );
+        }
+        update_option('tec_rb_attendee_questions', $attendee_questions);
+
+        $attendee_preset_names = isset($_POST['tec_rb_attendee_preset_name']) ? (array) wp_unslash($_POST['tec_rb_attendee_preset_name']) : array();
+        $attendee_preset_data = isset($_POST['tec_rb_attendee_preset_data']) ? (array) wp_unslash($_POST['tec_rb_attendee_preset_data']) : array();
+        $attendee_presets = array();
+        foreach ($attendee_preset_names as $index => $preset_name_raw) {
+            $preset_name = sanitize_text_field($preset_name_raw);
+            $preset_json = isset($attendee_preset_data[$index]) ? trim((string) $attendee_preset_data[$index]) : '';
+            if ($preset_name === '' && $preset_json === '') {
+                continue;
+            }
+            if ($preset_name === '' || $preset_json === '') {
+                $preset_errors[] = 'Each attendee question preset needs both a name and JSON data.';
+                continue;
+            }
+            $decoded = json_decode($preset_json, true);
+            if (!is_array($decoded)) {
+                $preset_errors[] = 'Attendee preset "' . esc_html($preset_name) . '" has invalid JSON.';
+                continue;
+            }
+            $attendee_presets[] = array(
+                'name' => $preset_name,
+                'questions' => $decoded,
+            );
+        }
+        update_option('tec_rb_attendee_question_presets', $attendee_presets);
         if (!empty($preset_errors)) {
             echo '<div class="error"><p>' . implode('<br>', array_map('esc_html', array_unique($preset_errors))) . '</p></div>';
         } else {
@@ -2723,13 +3045,70 @@ function tec_rb_render_settings_page() {
 
     $presets = tec_rb_get_presets();
     $defaults = tec_rb_get_default_options();
+    $ticket_suggestions = tec_rb_get_ticket_name_suggestions();
+    $attendee_questions = tec_rb_get_attendee_questions();
+    $attendee_question_presets = tec_rb_get_attendee_question_presets();
+    $has_attendee_presets = !empty($attendee_question_presets);
     $venues_url = admin_url('edit.php?post_type=tribe_venue');
     $organizers_url = admin_url('edit.php?post_type=tribe_organizer');
     $categories_url = admin_url('edit-tags.php?taxonomy=tribe_events_cat&post_type=tribe_events');
     $series_url = admin_url('edit.php?post_type=tribe_event_series');
+    $debug_url = admin_url('admin.php?page=tec-recurring-bookings-debug');
     ?>
-    <div class="wrap">
-        <h1>TicketPup Settings</h1>
+    <div class="wrap tec-wrap">
+        <div class="tec-app">
+        <?php echo tec_rb_render_topbar('TicketPup Settings', false, true); ?>
+        <div class="tec-settings-content">
+        <style>
+          .tec-settings-table {
+            overflow-x: auto;
+            max-width: 100%;
+          }
+          #tec-rb-attendee-questions th,
+          #tec-rb-attendee-questions td {
+            vertical-align: top;
+          }
+          #tec-rb-attendee-questions input[type="text"],
+          #tec-rb-attendee-questions select,
+          #tec-rb-attendee-questions textarea {
+            width: 100%;
+            min-width: 140px;
+            box-sizing: border-box;
+          }
+          .tec-question-options {
+            display: none;
+          }
+          .tec-question-options.is-visible {
+            display: table-cell;
+          }
+          .tec-rb-preset {
+            border: 1px solid #dcdcde;
+            border-radius: 6px;
+            background: #fff;
+            padding: 12px;
+            margin-bottom: 12px;
+          }
+          .tec-rb-preset-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+          }
+          .tec-rb-preset-json {
+            margin-top: 8px;
+          }
+          .tec-rb-preset-json.is-hidden {
+            display: none;
+          }
+          .tec-settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+          }
+        </style>
+        <h2>Create Event Data</h2>
         <p>Venues, organizers, categories, and series are pulled directly from The Events Calendar.</p>
         <p class="tec-inline">
             <a class="button" href="<?php echo esc_url($venues_url); ?>">Manage Venues</a>
@@ -2737,6 +3116,7 @@ function tec_rb_render_settings_page() {
             <a class="button" href="<?php echo esc_url($categories_url); ?>">Manage Categories</a>
             <a class="button" href="<?php echo esc_url($series_url); ?>">Manage Series</a>
         </p>
+        <div class="tec-divider tec-divider--section"></div>
         <form method="post">
             <?php wp_nonce_field('tec_rb_settings_save', 'tec_rb_nonce'); ?>
             <h2>Default Options</h2>
@@ -2763,58 +3143,429 @@ function tec_rb_render_settings_page() {
                         <label><input type="radio" name="tec_rb_default_waitlist_mode" value="sold_out" <?php checked(($defaults['waitlist_mode'] ?? 'none') === 'sold_out'); ?> /> When tickets are sold out</label>
                     </td>
                 </tr>
+                <tr>
+                    <th scope="row">Default Attendee Collection</th>
+                    <td>
+                        <select name="tec_rb_default_attendee_collection">
+                            <option value="none" <?php selected(($defaults['attendee_collection'] ?? 'none') === 'none'); ?>>No Individual Attendee Collection</option>
+                            <option value="allow" <?php selected(($defaults['attendee_collection'] ?? 'none') === 'allow'); ?> <?php disabled(!$has_attendee_presets); ?>>Allow Individual Attendee Collection</option>
+                            <option value="require" <?php selected(($defaults['attendee_collection'] ?? 'none') === 'require'); ?> <?php disabled(!$has_attendee_presets); ?>>Require Individual Attendee Collection</option>
+                        </select>
+                        <?php if (!$has_attendee_presets) : ?>
+                            <p class="description">Create an attendee question preset to enable attendee collection options.</p>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr id="tec-rb-default-attendee-preset-row" style="<?php echo (!$has_attendee_presets || !in_array(($defaults['attendee_collection'] ?? 'none'), array('allow', 'require'), true)) ? 'display:none;' : ''; ?>">
+                    <th scope="row">Default Attendee Preset</th>
+                    <td>
+                        <select name="tec_rb_default_attendee_preset">
+                            <option value="">Select preset</option>
+                            <?php foreach ($attendee_question_presets as $index => $preset) : ?>
+                                <?php $preset_label = $preset['name'] ?? ('Preset ' . ($index + 1)); ?>
+                                <option value="<?php echo esc_attr($index); ?>" <?php selected((string) ($defaults['attendee_collection_preset'] ?? '') === (string) $index); ?>>
+                                    <?php echo esc_html($preset_label); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </td>
+                </tr>
             </table>
-            <h2>Presets</h2>
-            <p>Create presets by pasting JSON built from the form payload. Each preset can be selected in the form dropdown.</p>
+            <div class="tec-divider tec-divider--section"></div>
+            <h2>Ticket Name Suggestions</h2>
+            <p>Type a suggestion and press Enter to save it. These will appear in the Ticket Name dropdown.</p>
+            <div class="tec-tags-row" data-tec-tags-picker>
+              <div class="tec-control">
+                <input class="tec-input" type="text" data-tags-entry placeholder="Type a ticket name and press Enter" />
+              </div>
+              <div class="tec-tags-list" data-tags-list></div>
+            </div>
+            <textarea class="tec-input is-hidden" rows="4" name="tec_rb_ticket_name_suggestions" data-tags-input data-tags-separator="newline"><?php echo esc_textarea(implode("\n", $ticket_suggestions)); ?></textarea>
+
+            <div class="tec-divider tec-divider--section"></div>
+            <h2>Attendee Question Presets</h2>
+            <p>Saved presets. Click “Edit” to update the name or JSON.</p>
+            <div id="tec-rb-attendee-presets">
+                <?php if (!empty($attendee_question_presets)) : ?>
+                    <?php foreach ($attendee_question_presets as $preset) : ?>
+                        <div class="tec-rb-preset">
+                            <div class="tec-rb-preset-row">
+                                <input class="regular-text" type="text" name="tec_rb_attendee_preset_name[]" value="<?php echo esc_attr($preset['name'] ?? ''); ?>" placeholder="Preset name" readonly />
+                                <button class="button tec-rb-toggle-json" type="button">Edit</button>
+                                <button class="button tec-rb-remove-attendee-preset" type="button">Remove</button>
+                            </div>
+                            <div class="tec-rb-preset-json is-hidden">
+                                <textarea class="large-text" rows="6" name="tec_rb_attendee_preset_data[]"><?php echo esc_textarea(wp_json_encode($preset['questions'] ?? array(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); ?></textarea>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else : ?>
+                    <p class="description tec-rb-empty">No presets have been set.</p>
+                <?php endif; ?>
+            </div>
+            <p><button class="button" type="button" id="tec-rb-open-attendee-builder">Add attendee question preset</button></p>
+            <div id="tec-rb-attendee-builder" class="tec-rb-builder is-hidden">
+                <div class="tec-settings-table">
+                <table class="widefat striped" id="tec-rb-attendee-questions">
+                    <thead>
+                        <tr>
+                            <th>Label</th>
+                            <th>Type</th>
+                            <th>Required</th>
+                            <th>Placeholder</th>
+                            <th>Description</th>
+                            <th class="tec-question-options">Options</th>
+                            <th>Multiline</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><input class="regular-text" type="text" name="tec_rb_question_label[]" placeholder="Question label" /></td>
+                            <td>
+                                <select name="tec_rb_question_type[]">
+                                    <option value="text">Text</option>
+                                    <option value="email">Email</option>
+                                    <option value="telephone">Telephone</option>
+                                    <option value="url">URL</option>
+                                    <option value="date">Date</option>
+                                    <option value="select">Dropdown</option>
+                                    <option value="radio">Radio</option>
+                                    <option value="checkbox">Checkbox</option>
+                                </select>
+                            </td>
+                            <td><input type="checkbox" name="tec_rb_question_required[]" /></td>
+                            <td><input class="regular-text" type="text" name="tec_rb_question_placeholder[]" /></td>
+                            <td><input class="regular-text" type="text" name="tec_rb_question_description[]" /></td>
+                            <td class="tec-question-options"><input class="regular-text" type="text" name="tec_rb_question_options[]" placeholder="Option 1, Option 2" /></td>
+                            <td><input type="checkbox" name="tec_rb_question_multiline[]" /></td>
+                            <td><button class="button tec-rb-remove-question" type="button">Remove</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+                </div>
+                <p class="tec-inline">
+                    <button class="button" type="button" id="tec-rb-add-question">Add Question</button>
+                    <button class="button" type="button" id="tec-rb-save-attendee-preset">Save attendee questions preset</button>
+                    <button class="button" type="button" id="tec-rb-close-attendee-builder">Close builder</button>
+                </p>
+            </div>
+            <div class="tec-divider tec-divider--section"></div>
+            <h2>Event & Ticket Presets</h2>
+            <p>Useful when you’re generating the same type of tickets and events regularly and want to keep consistency.</p>
             <div id="tec-rb-presets">
                 <?php if (!empty($presets)) : ?>
                     <?php foreach ($presets as $preset) : ?>
                         <div class="tec-rb-preset">
-                            <input class="regular-text" type="text" name="tec_rb_presets_name[]" value="<?php echo esc_attr($preset['name'] ?? ''); ?>" placeholder="Preset name" />
-                            <textarea class="large-text" rows="6" name="tec_rb_presets_data[]"><?php echo esc_textarea(wp_json_encode($preset['data'] ?? array(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); ?></textarea>
-                            <button class="button tec-rb-remove-preset" type="button">Remove</button>
+                            <div class="tec-rb-preset-row">
+                                <input class="regular-text" type="text" name="tec_rb_presets_name[]" value="<?php echo esc_attr($preset['name'] ?? ''); ?>" placeholder="Preset name" readonly />
+                                <button class="button tec-rb-toggle-json" type="button">Edit</button>
+                                <button class="button tec-rb-remove-preset" type="button">Remove</button>
+                            </div>
+                            <div class="tec-rb-preset-json is-hidden">
+                                <textarea class="large-text" rows="6" name="tec_rb_presets_data[]"><?php echo esc_textarea(wp_json_encode($preset['data'] ?? array(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)); ?></textarea>
+                            </div>
                         </div>
                     <?php endforeach; ?>
+                <?php else : ?>
+                    <p class="description tec-rb-empty">No presets have been set.</p>
                 <?php endif; ?>
-                <div class="tec-rb-preset">
-                    <input class="regular-text" type="text" name="tec_rb_presets_name[]" placeholder="Preset name" />
-                    <textarea class="large-text" rows="6" name="tec_rb_presets_data[]" placeholder='{"eventName":"Example","startDate":"2026-02-05","endDate":"2026-02-06","recurrenceDays":["mon"],"occurrences":[{"name":"Morning","startTime":"9:00 AM","endTime":"10:00 AM"}],"ticketTypes":[{"name":"General","price":"25","quantity":"10"}]}'></textarea>
-                    <button class="button tec-rb-remove-preset" type="button">Remove</button>
-                </div>
             </div>
             <p><button class="button" type="button" id="tec-rb-add-preset">Add Preset</button></p>
+            <div class="tec-divider tec-divider--section"></div>
+            <h2>Troubleshooting</h2>
+            <p>Use this tool to compare saved events and tickets by ID.</p>
+            <p><a class="button" href="<?php echo esc_url($debug_url); ?>">Debug events &amp; tickets with ID numbers</a></p>
 
             <?php submit_button('Save Settings'); ?>
         </form>
+        </div>
         <script>
           (function() {
             const container = document.getElementById('tec-rb-presets');
             const addButton = document.getElementById('tec-rb-add-preset');
-            if (!container || !addButton) return;
-            const buildRow = () => {
-              const row = document.createElement('div');
-              row.className = 'tec-rb-preset';
-              row.innerHTML = `
-                <input class="regular-text" type="text" name="tec_rb_presets_name[]" placeholder="Preset name" />
-                <textarea class="large-text" rows="6" name="tec_rb_presets_data[]" placeholder="{}"></textarea>
-                <button class="button tec-rb-remove-preset" type="button">Remove</button>
-              `;
-              return row;
+            const attendeeContainer = document.getElementById('tec-rb-attendee-presets');
+            const builder = document.getElementById('tec-rb-attendee-builder');
+            const openBuilderButton = document.getElementById('tec-rb-open-attendee-builder');
+            const closeBuilderButton = document.getElementById('tec-rb-close-attendee-builder');
+            const defaultCollectionSelect = document.querySelector('select[name="tec_rb_default_attendee_collection"]');
+            const defaultPresetRow = document.getElementById('tec-rb-default-attendee-preset-row');
+            const hasAttendeePresets = <?php echo $has_attendee_presets ? 'true' : 'false'; ?>;
+
+            const removeEmpty = (rootEl) => {
+              if (!rootEl) return;
+              const empty = rootEl.querySelector('.tec-rb-empty');
+              if (empty) {
+                empty.remove();
+              }
             };
-            addButton.addEventListener('click', () => {
-              container.appendChild(buildRow());
-            });
-            container.addEventListener('click', (event) => {
-              const target = event.target;
-              if (target && target.classList.contains('tec-rb-remove-preset')) {
-                const row = target.closest('.tec-rb-preset');
-                if (row) {
-                  row.remove();
+
+            const togglePresetEdit = (row) => {
+              if (!row) return;
+              const panel = row.querySelector('.tec-rb-preset-json');
+              const input = row.querySelector('input[type="text"]');
+              const isEditing = !row.classList.contains('is-editing');
+              row.classList.toggle('is-editing', isEditing);
+              if (panel) {
+                panel.classList.toggle('is-hidden', !isEditing);
+              }
+              if (input) {
+                input.readOnly = !isEditing;
+                if (isEditing) {
+                  input.focus();
                 }
               }
-            });
+            };
+
+            const toggleDefaultPresetRow = () => {
+              if (!defaultPresetRow || !defaultCollectionSelect) {
+                return;
+              }
+              const show = hasAttendeePresets && (defaultCollectionSelect.value === 'allow' || defaultCollectionSelect.value === 'require');
+              defaultPresetRow.style.display = show ? '' : 'none';
+            };
+            if (defaultCollectionSelect) {
+              defaultCollectionSelect.addEventListener('change', toggleDefaultPresetRow);
+              toggleDefaultPresetRow();
+            }
+
+            if (container && addButton) {
+              const buildRow = () => {
+                const row = document.createElement('div');
+                row.className = 'tec-rb-preset';
+                row.innerHTML = `
+                  <div class="tec-rb-preset-row">
+                    <input class="regular-text" type="text" name="tec_rb_presets_name[]" placeholder="Preset name" />
+                    <button class="button tec-rb-toggle-json" type="button">Edit</button>
+                    <button class="button tec-rb-remove-preset" type="button">Remove</button>
+                  </div>
+                  <div class="tec-rb-preset-json">
+                    <textarea class="large-text" rows="6" name="tec_rb_presets_data[]" placeholder="{}"></textarea>
+                  </div>
+                `;
+                return row;
+              };
+              addButton.addEventListener('click', () => {
+                removeEmpty(container);
+                const row = buildRow();
+                container.appendChild(row);
+                togglePresetEdit(row);
+              });
+              container.addEventListener('click', (event) => {
+                const target = event.target;
+                if (target && target.classList.contains('tec-rb-remove-preset')) {
+                  const row = target.closest('.tec-rb-preset');
+                  if (row) {
+                    row.remove();
+                    if (!container.querySelector('.tec-rb-preset') && !container.querySelector('.tec-rb-empty')) {
+                      container.insertAdjacentHTML('beforeend', '<p class="description tec-rb-empty">No presets have been set.</p>');
+                    }
+                  }
+                }
+                if (target && target.classList.contains('tec-rb-toggle-json')) {
+                  const row = target.closest('.tec-rb-preset');
+                  togglePresetEdit(row);
+                }
+              });
+            }
+
+            if (attendeeContainer) {
+              attendeeContainer.addEventListener('click', (event) => {
+                const target = event.target;
+                if (target && target.classList.contains('tec-rb-remove-attendee-preset')) {
+                  const row = target.closest('.tec-rb-preset');
+                  if (row) {
+                    row.remove();
+                    if (!attendeeContainer.querySelector('.tec-rb-preset') && !attendeeContainer.querySelector('.tec-rb-empty')) {
+                      attendeeContainer.insertAdjacentHTML('beforeend', '<p class="description tec-rb-empty">No presets have been set.</p>');
+                    }
+                  }
+                }
+                if (target && target.classList.contains('tec-rb-toggle-json')) {
+                  const row = target.closest('.tec-rb-preset');
+                  togglePresetEdit(row);
+                }
+              });
+            }
+
+            const questionsTable = document.getElementById('tec-rb-attendee-questions');
+            const addQuestionButton = document.getElementById('tec-rb-add-question');
+            const saveAttendeePresetButton = document.getElementById('tec-rb-save-attendee-preset');
+            if (questionsTable && addQuestionButton) {
+              const tbody = questionsTable.querySelector('tbody');
+              const slugify = (value) => String(value || '')
+                .toLowerCase()
+                .trim()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '');
+              const collectQuestions = () => {
+                const rows = Array.from(questionsTable.querySelectorAll('tbody tr'));
+                const questions = [];
+                rows.forEach((row) => {
+                  const labelInput = row.querySelector('input[name=\"tec_rb_question_label[]\"]');
+                  const label = labelInput ? labelInput.value.trim() : '';
+                  if (!label) return;
+                  const typeSelect = row.querySelector('select[name=\"tec_rb_question_type[]\"]');
+                  const type = typeSelect ? typeSelect.value : 'text';
+                  const required = row.querySelector('input[name=\"tec_rb_question_required[]\"]')?.checked ? 'on' : '';
+                  const placeholder = row.querySelector('input[name=\"tec_rb_question_placeholder[]\"]')?.value?.trim() || '';
+                  const description = row.querySelector('input[name=\"tec_rb_question_description[]\"]')?.value?.trim() || '';
+                  const optionsRaw = row.querySelector('input[name=\"tec_rb_question_options[]\"]')?.value || '';
+                  const options = ['radio', 'checkbox', 'select'].includes(type)
+                    ? optionsRaw.split(/\\r\\n|\\r|\\n|,/).map((value) => value.trim()).filter(Boolean)
+                    : [];
+                  const extra = {};
+                  const multiline = row.querySelector('input[name=\"tec_rb_question_multiline[]\"]')?.checked;
+                  if (type === 'text' && multiline) {
+                    extra.multiline = 'yes';
+                  }
+                  if (options.length) {
+                    extra.options = options;
+                  }
+                  questions.push({
+                    id: 0,
+                    type,
+                    required,
+                    label,
+                    slug: slugify(label),
+                    extra,
+                    classes: [],
+                    attributes: [],
+                    placeholder,
+                    description,
+                    field_order: questions.length,
+                  });
+                });
+                return questions;
+              };
+              const updateRowVisibility = (row) => {
+                if (!row) return;
+                const typeSelect = row.querySelector('select[name="tec_rb_question_type[]"]');
+                const optionsCell = row.querySelector('.tec-question-options');
+                const optionsInput = optionsCell ? optionsCell.querySelector('input') : null;
+                const multilineCheckbox = row.querySelector('input[name="tec_rb_question_multiline[]"]');
+                const type = typeSelect ? typeSelect.value : 'text';
+                const showOptions = ['radio', 'checkbox', 'select'].includes(type);
+                if (optionsCell) {
+                  optionsCell.classList.toggle('is-visible', showOptions);
+                }
+                if (!showOptions && optionsInput) {
+                  optionsInput.value = '';
+                }
+                if (multilineCheckbox) {
+                  multilineCheckbox.disabled = type !== 'text';
+                  if (type !== 'text') {
+                    multilineCheckbox.checked = false;
+                  }
+                }
+              };
+              const buildQuestionRow = () => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                  <td><input class="regular-text" type="text" name="tec_rb_question_label[]" placeholder="Question label" /></td>
+                  <td>
+                    <select name="tec_rb_question_type[]">
+                      <option value="text">Text</option>
+                      <option value="email">Email</option>
+                      <option value="telephone">Telephone</option>
+                      <option value="url">URL</option>
+                      <option value="date">Date</option>
+                      <option value="select">Dropdown</option>
+                      <option value="radio">Radio</option>
+                      <option value="checkbox">Checkbox</option>
+                    </select>
+                  </td>
+                  <td><input type="checkbox" name="tec_rb_question_required[]" /></td>
+                  <td><input class="regular-text" type="text" name="tec_rb_question_placeholder[]" /></td>
+                  <td><input class="regular-text" type="text" name="tec_rb_question_description[]" /></td>
+                  <td class="tec-question-options"><input class="regular-text" type="text" name="tec_rb_question_options[]" placeholder="Option 1, Option 2" /></td>
+                  <td><input type="checkbox" name="tec_rb_question_multiline[]" /></td>
+                  <td><button class="button tec-rb-remove-question" type="button">Remove</button></td>
+                `;
+                updateRowVisibility(row);
+                const typeSelect = row.querySelector('select[name="tec_rb_question_type[]"]');
+                if (typeSelect) {
+                  typeSelect.addEventListener('change', () => updateRowVisibility(row));
+                }
+                return row;
+              };
+              const resetBuilder = () => {
+                if (!tbody) return;
+                tbody.innerHTML = "";
+                tbody.appendChild(buildQuestionRow());
+              };
+              if (openBuilderButton && builder) {
+                openBuilderButton.addEventListener('click', () => {
+                  resetBuilder();
+                  builder.classList.remove('is-hidden');
+                });
+              }
+              if (closeBuilderButton && builder) {
+                closeBuilderButton.addEventListener('click', () => {
+                  builder.classList.add('is-hidden');
+                });
+              }
+              addQuestionButton.addEventListener('click', () => {
+                if (tbody) {
+                  tbody.appendChild(buildQuestionRow());
+                }
+              });
+              questionsTable.addEventListener('click', (event) => {
+                const target = event.target;
+                if (target && target.classList.contains('tec-rb-remove-question')) {
+                  const row = target.closest('tr');
+                  if (row) {
+                    row.remove();
+                  }
+                }
+              });
+              questionsTable.querySelectorAll('tbody tr').forEach((row) => {
+                const typeSelect = row.querySelector('select[name="tec_rb_question_type[]"]');
+                if (typeSelect) {
+                  typeSelect.addEventListener('change', () => updateRowVisibility(row));
+                }
+                updateRowVisibility(row);
+              });
+              if (saveAttendeePresetButton && attendeeContainer) {
+                saveAttendeePresetButton.addEventListener('click', () => {
+                  const name = window.prompt('Preset name');
+                  if (!name) {
+                    return;
+                  }
+                  const questions = collectQuestions();
+                  if (!questions.length) {
+                    window.alert('Add at least one question before saving a preset.');
+                    return;
+                  }
+                  removeEmpty(attendeeContainer);
+                  const row = document.createElement('div');
+                  row.className = 'tec-rb-preset';
+                  row.innerHTML = `
+                    <div class="tec-rb-preset-row">
+                      <input class="regular-text" type="text" name="tec_rb_attendee_preset_name[]" placeholder="Preset name" readonly />
+                      <button class="button tec-rb-toggle-json" type="button">Edit</button>
+                      <button class="button tec-rb-remove-attendee-preset" type="button">Remove</button>
+                    </div>
+                    <div class="tec-rb-preset-json is-hidden">
+                      <textarea class="large-text" rows="6" name="tec_rb_attendee_preset_data[]" placeholder="[]"></textarea>
+                    </div>
+                  `;
+                  const nameInput = row.querySelector('input[name="tec_rb_attendee_preset_name[]"]');
+                  const jsonArea = row.querySelector('textarea[name="tec_rb_attendee_preset_data[]"]');
+                  if (nameInput) {
+                    nameInput.value = name;
+                    nameInput.readOnly = true;
+                  }
+                  if (jsonArea) {
+                    jsonArea.value = JSON.stringify(questions, null, 2);
+                  }
+                  attendeeContainer.appendChild(row);
+                });
+              }
+            }
           })();
         </script>
+        </div>
     </div>
     <?php
 }

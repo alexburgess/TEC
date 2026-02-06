@@ -78,6 +78,19 @@
     return buildOptions(values, selected);
   };
 
+  const buildAttendeePresetOptions = () => {
+    const presets = window.tecRecurringBookingsConfig?.attendeeQuestionPresets || [];
+    if (!Array.isArray(presets) || presets.length === 0) {
+      return '<option value="">No presets have been set</option>';
+    }
+    const options = ['<option value="">Select preset</option>'];
+    presets.forEach((preset, index) => {
+      const label = preset?.name || `Preset ${index + 1}`;
+      options.push(`<option value="${index}">${escapeHtml(label)}</option>`);
+    });
+    return options.join("");
+  };
+
   const csvEscape = (value) => {
     const stringValue = value == null ? "" : String(value);
     return `"${stringValue.replace(/"/g, "\"\"")}"`;
@@ -88,18 +101,35 @@
 
   const to24HourTime = (timeValue) => {
     if (!timeValue) return "";
-    const match = timeValue.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (!match) return timeValue;
-    let hours = Number(match[1]);
-    const minutes = match[2];
-    const period = match[3].toUpperCase();
-    if (period === "AM" && hours === 12) {
-      hours = 0;
+    const trimmed = timeValue.trim();
+    const match12 = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (match12) {
+      let hours = Number(match12[1]);
+      const minutes = match12[2];
+      const period = match12[3].toUpperCase();
+      if (period === "AM" && hours === 12) {
+        hours = 0;
+      }
+      if (period === "PM" && hours !== 12) {
+        hours += 12;
+      }
+      return `${String(hours).padStart(2, "0")}:${minutes}:00`;
     }
-    if (period === "PM" && hours !== 12) {
-      hours += 12;
+    const match24 = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (match24) {
+      const hours = String(Number(match24[1])).padStart(2, "0");
+      const minutes = String(Number(match24[2])).padStart(2, "0");
+      const seconds = match24[3] ? String(Number(match24[3])).padStart(2, "0") : "00";
+      return `${hours}:${minutes}:${seconds}`;
     }
-    return `${String(hours).padStart(2, "0")}:${minutes}:00`;
+    return trimmed;
+  };
+
+  const normalizeTimeInput = (value) => {
+    if (!value) return "";
+    const as24 = to24HourTime(value);
+    if (!as24) return "";
+    return as24.slice(0, 5);
   };
 
   const formatDate = (date) => {
@@ -225,7 +255,11 @@
     const tagsValue = Array.isArray(data.eventTags)
       ? data.eventTags.join(", ")
       : data.eventTags;
-    setInputValue(root.querySelector('[name="event_tags"]'), tagsValue);
+    const tagsInput = root.querySelector('[name="event_tags"]');
+    setInputValue(tagsInput, tagsValue);
+    if (typeof root.tecSyncTags === "function") {
+      root.tecSyncTags();
+    }
     setInputValue(root.querySelector('[name="event_description"]'), data.eventDescription);
     setInputValue(root.querySelector('[name="event_featured_image"]'), data.eventFeaturedImage);
     setInputValue(root.querySelector('[name="event_website"]'), data.eventWebsite);
@@ -306,13 +340,13 @@
         root.querySelector(`input[name="occurrence_${number}_name"]`),
         occurrence.name
       );
-      setSelectValue(
-        root.querySelector(`select[name="occurrence_${number}_start_time"]`),
-        occurrence.startTime
+      setInputValue(
+        root.querySelector(`input[name="occurrence_${number}_start_time"]`),
+        normalizeTimeInput(occurrence.startTime)
       );
-      setSelectValue(
-        root.querySelector(`select[name="occurrence_${number}_end_time"]`),
-        occurrence.endTime
+      setInputValue(
+        root.querySelector(`input[name="occurrence_${number}_end_time"]`),
+        normalizeTimeInput(occurrence.endTime)
       );
     });
 
@@ -392,12 +426,27 @@
         root.querySelector(`input[name="ticket_${number}_cost"]`),
         ticket.price
       );
+      const freeTicket = root.querySelector(`input[name="ticket_${number}_free"]`);
+      if (freeTicket) {
+        freeTicket.checked = !!ticket.isFree;
+        freeTicket.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       setInputValue(
         root.querySelector(`input[name="ticket_${number}_quantity"]`),
         ticket.quantity
       );
       const showDesc = root.querySelector(`input[name="ticket_${number}_show_description"]`);
       if (showDesc) showDesc.checked = !!ticket.showDescription;
+      const attendeeSelect = root.querySelector(`select[name="ticket_${number}_attendee_collection"]`);
+      if (attendeeSelect) {
+        attendeeSelect.value = ticket.attendeeCollection || "none";
+        attendeeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      const attendeePreset = root.querySelector(`select[name="ticket_${number}_attendee_preset"]`);
+      if (attendeePreset) {
+        attendeePreset.value = ticket.attendeePreset ?? "";
+        attendeePreset.dispatchEvent(new Event("change", { bubbles: true }));
+      }
 
       const saleStart = ticket.saleStartMode || "immediate";
       const saleStartRadio = root.querySelector(
@@ -411,8 +460,8 @@
         root.querySelector(`input[name="ticket_${number}_sale_start_date"]`),
         ticket.saleStartDate
       );
-      setSelectValue(
-        root.querySelector(`select[name="ticket_${number}_sale_start_time"]`),
+      setInputValue(
+        root.querySelector(`input[name="ticket_${number}_sale_start_time"]`),
         ticket.saleStartTime
       );
       setInputValue(
@@ -448,7 +497,6 @@
     if (!container) return;
     const wrapper = container.closest(".tec-expand-container");
 
-    const times = timeOptions();
     if (count < 1) {
       container.innerHTML = "";
       if (wrapper) {
@@ -478,19 +526,15 @@
             </div>
             <div class="tec-field">
               <p class="tec-label">Event start time</p>
-              <div class="tec-control tec-control--select">
-                <select class="tec-select" name="occurrence_${index}_start_time">
-                  ${buildOptions(times, "9:00 AM")}
-                </select>
+              <div class="tec-control">
+                <input class="tec-input" type="time" step="60" name="occurrence_${index}_start_time" value="09:00" />
               </div>
             </div>
             <div class="tec-arrow">→</div>
             <div class="tec-field">
               <p class="tec-label">Event end time</p>
-              <div class="tec-control tec-control--select">
-                <select class="tec-select" name="occurrence_${index}_end_time">
-                  ${buildOptions(times, "10:00 AM")}
-                </select>
+              <div class="tec-control">
+                <input class="tec-input" type="time" step="60" name="occurrence_${index}_end_time" value="10:00" />
               </div>
             </div>
           </div>
@@ -498,21 +542,45 @@
       `;
     }).join("");
 
-    container.querySelectorAll('select[name^="occurrence_"][name$="_start_time"]').forEach((select) => {
-      select.addEventListener("change", () => {
-        const name = select.getAttribute("name") || "";
+    const defaultAttendeeCollection =
+      window.tecRecurringBookingsConfig?.defaults?.attendee_collection || "none";
+    container
+      .querySelectorAll('select[name^="ticket_"][name$="_attendee_collection"]')
+      .forEach((select) => {
+        if (!select.value || select.value === "none") {
+          select.value = defaultAttendeeCollection;
+        }
+      });
+
+    const toMinutes = (value) => {
+      if (!value) return null;
+      const parts = value.split(":").map((part) => Number(part));
+      if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) {
+        return null;
+      }
+      return parts[0] * 60 + parts[1];
+    };
+    const fromMinutes = (minutes) => {
+      if (minutes == null) return "";
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+    };
+    container.querySelectorAll('input[name^="occurrence_"][name$="_start_time"]').forEach((input) => {
+      input.addEventListener("change", () => {
+        const name = input.getAttribute("name") || "";
         const indexMatch = name.match(/occurrence_(\d+)_start_time/);
         if (!indexMatch) return;
         const index = indexMatch[1];
-        const endSelect = container.querySelector(`select[name="occurrence_${index}_end_time"]`);
-        if (!endSelect) return;
-        const options = Array.from(select.options).map((option) => option.value);
-        const startIndex = options.indexOf(select.value);
-        const endIndex = options.indexOf(endSelect.value);
-        if (startIndex >= 0 && endIndex >= 0 && endIndex <= startIndex) {
-          const nextIndex = Math.min(startIndex + 1, options.length - 1);
-          endSelect.value = options[nextIndex] || endSelect.value;
-          endSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        const endInput = container.querySelector(`input[name="occurrence_${index}_end_time"]`);
+        if (!endInput) return;
+        const startMinutes = toMinutes(input.value);
+        const endMinutes = toMinutes(endInput.value);
+        if (startMinutes == null || endMinutes == null) return;
+        if (endMinutes <= startMinutes) {
+          const next = Math.min(startMinutes + 60, 23 * 60 + 59);
+          endInput.value = fromMinutes(next);
+          endInput.dispatchEvent(new Event("change", { bubbles: true }));
         }
       });
     });
@@ -522,8 +590,6 @@
     const container = root.querySelector("[data-ticket-list]");
     if (!container) return;
     const wrapper = container.closest(".tec-expand-container");
-
-    const times = timeOptions();
 
     if (count < 1) {
       container.innerHTML = "";
@@ -552,7 +618,7 @@
               <div class="tec-field">
                 <p class="tec-label">Ticket Name*</p>
                 <div class="tec-control">
-                  <input class="tec-input" name="ticket_${index}_name" type="text" placeholder="e.g. Regular Ticket" />
+                  <input class="tec-input" name="ticket_${index}_name" type="text" list="tec-ticket-name-suggestions" placeholder="e.g. Regular Ticket" />
                 </div>
               </div>
               <div class="tec-field">
@@ -568,13 +634,17 @@
             </div>
 
             <div class="tec-ticket-mid">
-              <div class="tec-field">
+              <div class="tec-field tec-field--compact">
                 <p class="tec-label">Ticket Cost*</p>
                 <div class="tec-control">
                   <input class="tec-input" name="ticket_${index}_cost" type="text" placeholder="$140" />
                 </div>
               </div>
-              <div class="tec-field">
+              <label class="tec-checkbox tec-checkbox--inline tec-free-ticket">
+                <input type="checkbox" name="ticket_${index}_free" />
+                <span>Free ticket</span>
+              </label>
+              <div class="tec-field tec-field--compact">
                 <p class="tec-label">Quantity*</p>
                 <div class="tec-control">
                   <input class="tec-input" name="ticket_${index}_quantity" type="number" min="0" placeholder="8" />
@@ -597,10 +667,8 @@
                   <div class="tec-control tec-control--date is-disabled" data-sale-start="set">
                     <input class="tec-input" type="date" name="ticket_${index}_sale_start_date" disabled />
                   </div>
-                  <div class="tec-control tec-control--select is-disabled" data-sale-start="set">
-                    <select class="tec-select" name="ticket_${index}_sale_start_time" disabled>
-                      ${buildOptions(times, "9:00 AM")}
-                    </select>
+                  <div class="tec-control is-disabled" data-sale-start="set">
+                    <input class="tec-input" type="time" name="ticket_${index}_sale_start_time" disabled />
                   </div>
                 </div>
                 <div class="tec-inline">
@@ -645,10 +713,36 @@
                 </div>
               </div>
             </div>
+
+            <div class="tec-ticket-extra">
+              <div class="tec-field">
+                <p class="tec-label">Attendee collection</p>
+                <div class="tec-control tec-control--select">
+                  <select class="tec-select" name="ticket_${index}_attendee_collection">
+                    <option value="none">No Individual Attendee Collection</option>
+                    <option value="allow">Allow Individual Attendee Collection</option>
+                    <option value="require">Require Individual Attendee Collection</option>
+                  </select>
+                </div>
+              </div>
+              <div class="tec-field">
+                <p class="tec-label">Attendee questions preset</p>
+                <div class="tec-control tec-control--select">
+                  <select class="tec-select" name="ticket_${index}_attendee_preset">
+                    ${buildAttendeePresetOptions()}
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       `;
     }).join("");
+
+    const attendeePresets = window.tecRecurringBookingsConfig?.attendeeQuestionPresets || [];
+    const hasAttendeePresets = Array.isArray(attendeePresets) && attendeePresets.length > 0;
+    const defaultAttendeePreset =
+      window.tecRecurringBookingsConfig?.defaults?.attendee_collection_preset ?? "";
 
     container.querySelectorAll("[data-ticket-index]").forEach((ticketEl) => {
       const updateRadioGroups = (groupName, attr) => {
@@ -670,6 +764,51 @@
 
       updateRadioGroups("sale_start", "sale-start");
       updateRadioGroups("sale_end", "sale-end");
+
+      const attendeeSelect = ticketEl.querySelector('select[name^="ticket_"][name$="_attendee_collection"]');
+      const attendeePresetSelect = ticketEl.querySelector('select[name^="ticket_"][name$="_attendee_preset"]');
+      if (attendeeSelect) {
+        Array.from(attendeeSelect.options).forEach((option) => {
+          if (option.value !== "none") {
+            option.disabled = !hasAttendeePresets;
+          }
+        });
+        if (!hasAttendeePresets) {
+          attendeeSelect.value = "none";
+        }
+      }
+      if (attendeePresetSelect) {
+        attendeePresetSelect.disabled = !hasAttendeePresets;
+        if (!hasAttendeePresets) {
+          attendeePresetSelect.value = "";
+        } else if (!attendeePresetSelect.value && defaultAttendeePreset !== "") {
+          attendeePresetSelect.value = defaultAttendeePreset;
+        }
+      }
+
+      const freeToggle = ticketEl.querySelector('input[name^="ticket_"][name$="_free"]');
+      const costInput = ticketEl.querySelector('input[name^="ticket_"][name$="_cost"]');
+      if (freeToggle && costInput) {
+        const syncFree = () => {
+          if (freeToggle.checked) {
+            if (!costInput.dataset.prevValue) {
+              costInput.dataset.prevValue = costInput.value;
+            }
+            costInput.value = "0";
+            costInput.disabled = true;
+            costInput.classList.add("is-disabled");
+          } else {
+            costInput.disabled = false;
+            costInput.classList.remove("is-disabled");
+            if (costInput.value === "0") {
+              costInput.value = costInput.dataset.prevValue || "";
+            }
+            delete costInput.dataset.prevValue;
+          }
+        };
+        freeToggle.addEventListener("change", syncFree);
+        syncFree();
+      }
     });
   };
 
@@ -774,8 +913,8 @@
     const occurrenceNodes = Array.from(root.querySelectorAll(".tec-occurrence-item"));
     const occurrences = occurrenceNodes.map((node) => ({
       name: node.querySelector('input[name^="occurrence_"][name$="_name"]')?.value?.trim() ?? "",
-      startTime: node.querySelector('select[name^="occurrence_"][name$="_start_time"]')?.value ?? "",
-      endTime: node.querySelector('select[name^="occurrence_"][name$="_end_time"]')?.value ?? "",
+      startTime: node.querySelector('input[name^="occurrence_"][name$="_start_time"]')?.value ?? "",
+      endTime: node.querySelector('input[name^="occurrence_"][name$="_end_time"]')?.value ?? "",
     }));
 
     const rows = [];
@@ -850,8 +989,8 @@
     const occurrences = occurrenceNodes.map((node, index) => ({
       index: index + 1,
       name: node.querySelector('input[name^="occurrence_"][name$="_name"]')?.value?.trim() ?? "",
-      startTime: node.querySelector('select[name^="occurrence_"][name$="_start_time"]')?.value ?? "",
-      endTime: node.querySelector('select[name^="occurrence_"][name$="_end_time"]')?.value ?? "",
+      startTime: node.querySelector('input[name^="occurrence_"][name$="_start_time"]')?.value ?? "",
+      endTime: node.querySelector('input[name^="occurrence_"][name$="_end_time"]')?.value ?? "",
     }));
 
     const instances = [];
@@ -921,7 +1060,7 @@
       const saleStartMode = node.querySelector(`input[name="ticket_${ticketIndex}_sale_start"]:checked`)?.value ?? "immediate";
       const saleEndMode = node.querySelector(`input[name="ticket_${ticketIndex}_sale_end"]:checked`)?.value ?? "start";
       const saleStartDate = node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_date"]`)?.value?.trim() ?? "";
-      const saleStartTime = node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_time"]`)?.value ?? "";
+      const saleStartTime = node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_time"]`)?.value ?? "";
       const saleStartOffset = node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_offset"]`)?.value ?? "";
       const saleStartUnit = node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_unit"]`)?.value ?? "";
       const saleEndOffset = node.querySelector(`input[name="ticket_${ticketIndex}_sale_end_offset"]`)?.value ?? "";
@@ -1001,8 +1140,8 @@
     const occurrences = occurrenceNodes.map((node, index) => ({
       index: index + 1,
       name: node.querySelector('input[name^="occurrence_"][name$="_name"]')?.value?.trim() ?? "",
-      startTime: node.querySelector('select[name^="occurrence_"][name$="_start_time"]')?.value ?? "",
-      endTime: node.querySelector('select[name^="occurrence_"][name$="_end_time"]')?.value ?? "",
+      startTime: node.querySelector('input[name^="occurrence_"][name$="_start_time"]')?.value ?? "",
+      endTime: node.querySelector('input[name^="occurrence_"][name$="_end_time"]')?.value ?? "",
     }));
 
     const normalizeSelect = (value, emptySentinels) => {
@@ -1017,11 +1156,14 @@
         name: node.querySelector(`input[name="ticket_${ticketIndex}_name"]`)?.value?.trim() ?? "",
         description: node.querySelector(`input[name="ticket_${ticketIndex}_description"]`)?.value?.trim() ?? "",
         price: node.querySelector(`input[name="ticket_${ticketIndex}_cost"]`)?.value?.trim() ?? "",
+        isFree: node.querySelector(`input[name="ticket_${ticketIndex}_free"]`)?.checked ?? false,
         quantity: node.querySelector(`input[name="ticket_${ticketIndex}_quantity"]`)?.value?.trim() ?? "",
         showDescription: node.querySelector(`input[name="ticket_${ticketIndex}_show_description"]`)?.checked ?? false,
+        attendeeCollection: node.querySelector(`select[name="ticket_${ticketIndex}_attendee_collection"]`)?.value ?? "none",
+        attendeePreset: node.querySelector(`select[name="ticket_${ticketIndex}_attendee_preset"]`)?.value ?? "",
         saleStartMode: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start"]:checked`)?.value ?? "immediate",
         saleStartDate: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_date"]`)?.value?.trim() ?? "",
-        saleStartTime: node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_time"]`)?.value ?? "",
+        saleStartTime: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_time"]`)?.value ?? "",
         saleStartOffset: node.querySelector(`input[name="ticket_${ticketIndex}_sale_start_offset"]`)?.value ?? "",
         saleStartUnit: node.querySelector(`select[name="ticket_${ticketIndex}_sale_start_unit"]`)?.value ?? "",
         saleEndMode: node.querySelector(`input[name="ticket_${ticketIndex}_sale_end"]:checked`)?.value ?? "start",
@@ -1039,10 +1181,6 @@
       .filter(Boolean);
 
     const tagsRaw = getValue('[name="event_tags"]');
-    const tagsList = tagsRaw
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean);
 
     return {
       eventName,
@@ -1051,7 +1189,7 @@
       eventOrganizer: normalizeSelect(getValue('[name="event_organizer"]'), ["Select organizer"]),
       eventCategory: normalizeSelect(getValue('[name="event_category"]'), ["Select category"]),
       eventSeries: normalizeSelect(getValue('[name="event_series"]'), ["No series"]),
-      eventTags: tagsList,
+      eventTags: tagsRaw,
       eventTagsRaw: tagsRaw,
       eventDescription: getValue('[name="event_description"]'),
       eventFeaturedImage: getValue('[name="event_featured_image"]'),
@@ -1282,6 +1420,7 @@
     const $ = window.jQuery;
 
     if (!fromInput || !toInput) return;
+    if (fromInput.type === "date" && toInput.type === "date") return;
     if (!$ || !$.fn || typeof $.fn.datepicker !== "function") return;
 
     const formatDate = (date) => (date ? $.datepicker.formatDate("yy-mm-dd", date) : "");
@@ -1498,8 +1637,44 @@
       specificSection.classList.toggle("is-hidden", !isSpecific);
       recurringSection.classList.toggle("is-hidden", isSpecific);
     };
+    if (!root.querySelector('input[name="schedule_mode"]:checked')) {
+      const specificRadio = root.querySelector('input[name="schedule_mode"][value="specific"]');
+      if (specificRadio) {
+        specificRadio.checked = true;
+      }
+    }
     radios.forEach((radio) => radio.addEventListener("change", sync));
     sync();
+  };
+
+  const initFeatureSticky = (root) => {
+    const feature = root.querySelector('[name="feature_event"]');
+    const sticky = root.querySelector('[name="hide_from_month"]');
+    if (!feature || !sticky) return;
+    const sync = () => {
+      if (feature.checked) {
+        sticky.checked = true;
+        sticky.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    };
+    feature.addEventListener("change", sync);
+    sync();
+  };
+
+  const initTicketNameSuggestions = (root) => {
+    const suggestions = window.tecRecurringBookingsConfig?.ticketNameSuggestions || [];
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
+      return;
+    }
+    let list = root.querySelector("#tec-ticket-name-suggestions");
+    if (!list) {
+      list = document.createElement("datalist");
+      list.id = "tec-ticket-name-suggestions";
+      root.appendChild(list);
+    }
+    list.innerHTML = suggestions
+      .map((item) => `<option value="${escapeHtml(item)}"></option>`)
+      .join("");
   };
 
   const initSpecificDatesPicker = (root) => {
@@ -1556,8 +1731,8 @@
     $(calendarEl).datepicker({
       dateFormat: "yy-mm-dd",
       numberOfMonths: 2,
-      showOtherMonths: true,
-      selectOtherMonths: true,
+      showOtherMonths: false,
+      selectOtherMonths: false,
       changeMonth: true,
       changeYear: true,
       beforeShowDay: (date) => {
@@ -1655,6 +1830,9 @@
     const listEl = root.querySelector("[data-tags-list]");
     if (!entryInput || !hiddenInput || !listEl) return;
 
+    const separator = hiddenInput.dataset.tagsSeparator === "newline" ? "\n" : ", ";
+    const splitPattern =
+      hiddenInput.dataset.tagsSeparator === "newline" ? /\r\n|\r|\n/ : /,/;
     let tags = [];
 
     const normalizeTags = (items) =>
@@ -1667,12 +1845,12 @@
       );
 
     const syncHidden = () => {
-      hiddenInput.value = tags.join(", ");
+      hiddenInput.value = tags.join(separator);
     };
 
     const renderList = () => {
       if (!tags.length) {
-        listEl.innerHTML = '<span class="is-muted">No tags added.</span>';
+        listEl.innerHTML = "";
         return;
       }
       listEl.innerHTML = tags
@@ -1693,19 +1871,31 @@
       renderList();
     };
 
+    const commitEntry = () => {
+      const value = entryInput.value.trim();
+      addTagsFromValue(value);
+      entryInput.value = "";
+    };
+
     entryInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === ",") {
         event.preventDefault();
+        event.stopPropagation();
         const value = entryInput.value.replace(/,+$/, "").trim();
         addTagsFromValue(value);
         entryInput.value = "";
       }
     });
 
+    entryInput.addEventListener("keypress", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+
     entryInput.addEventListener("blur", () => {
-      const value = entryInput.value.trim();
-      addTagsFromValue(value);
-      entryInput.value = "";
+      commitEntry();
     });
 
     entryInput.addEventListener("paste", (event) => {
@@ -1727,12 +1917,13 @@
     });
 
     const syncFromHidden = () => {
-      tags = normalizeTags((hiddenInput.value || "").split(","));
+      tags = normalizeTags((hiddenInput.value || "").split(splitPattern));
       syncHidden();
       renderList();
     };
 
     root.tecSyncTags = syncFromHidden;
+    root.tecCommitTags = commitEntry;
     syncFromHidden();
   };
 
@@ -1820,6 +2011,8 @@
     initSpecificDatesPicker(root);
     initRichTextToolbar(root);
     initTagsPicker(root);
+    initFeatureSticky(root);
+    initTicketNameSuggestions(root);
 
     const applyDefaults = () => {
       const defaults = window.tecRecurringBookingsConfig?.defaults || {};
@@ -1907,6 +2100,9 @@
         if (!presetName) {
           return;
         }
+        if (typeof root.tecCommitTags === "function") {
+          root.tecCommitTags();
+        }
         const payload = buildEventPayload(root);
         try {
           const formData = new FormData();
@@ -1990,7 +2186,50 @@
           return;
         }
 
+        if (typeof root.tecCommitTags === "function") {
+          root.tecCommitTags();
+        }
         const payload = buildEventPayload(root);
+        payload.ticketTypes = payload.ticketTypes.map((ticket) => {
+          if (ticket.isFree) {
+            return { ...ticket, price: ticket.price || "0" };
+          }
+          return ticket;
+        });
+        const invalidTicket = payload.ticketTypes.find(
+          (ticket) => !ticket.isFree && (!ticket.price || ticket.price.trim() === "")
+        );
+        if (invalidTicket) {
+          renderImportResults(resultsContainer, {
+            found: [],
+            missing: [],
+            errors: ["Ticket price is required unless the ticket is marked free."],
+            summary: "events would be created.",
+          });
+          return;
+        }
+        const hasAttendeePresets = Array.isArray(config.attendeeQuestionPresets) && config.attendeeQuestionPresets.length > 0;
+        const missingPreset = payload.ticketTypes.find(
+          (ticket) => ticket.attendeeCollection && ticket.attendeeCollection !== "none" && (!ticket.attendeePreset || ticket.attendeePreset === "")
+        );
+        if (!hasAttendeePresets && missingPreset) {
+          renderImportResults(resultsContainer, {
+            found: [],
+            missing: [],
+            errors: ["Attendee collection requires at least one attendee question preset."],
+            summary: "events would be created.",
+          });
+          return;
+        }
+        if (missingPreset) {
+          renderImportResults(resultsContainer, {
+            found: [],
+            missing: [],
+            errors: ["Select an attendee question preset for tickets with attendee collection enabled."],
+            summary: "events would be created.",
+          });
+          return;
+        }
         const requiresRange = payload.scheduleMode !== "specific";
         const hasSpecificDates = Array.isArray(payload.specificDates) && payload.specificDates.length > 0;
         if (!payload.eventName || (requiresRange && (!payload.startDate || !payload.endDate)) || (!requiresRange && !hasSpecificDates)) {
@@ -2071,7 +2310,50 @@
           return;
         }
 
+        if (typeof root.tecCommitTags === "function") {
+          root.tecCommitTags();
+        }
         const payload = buildEventPayload(root);
+        payload.ticketTypes = payload.ticketTypes.map((ticket) => {
+          if (ticket.isFree) {
+            return { ...ticket, price: ticket.price || "0" };
+          }
+          return ticket;
+        });
+        const invalidTicket = payload.ticketTypes.find(
+          (ticket) => !ticket.isFree && (!ticket.price || ticket.price.trim() === "")
+        );
+        if (invalidTicket) {
+          renderImportResults(resultsContainer, {
+            found: [],
+            missing: [],
+            errors: ["Ticket price is required unless the ticket is marked free."],
+            summary: "events created.",
+          });
+          return;
+        }
+        const hasAttendeePresets = Array.isArray(config.attendeeQuestionPresets) && config.attendeeQuestionPresets.length > 0;
+        const missingPreset = payload.ticketTypes.find(
+          (ticket) => ticket.attendeeCollection && ticket.attendeeCollection !== "none" && (!ticket.attendeePreset || ticket.attendeePreset === "")
+        );
+        if (!hasAttendeePresets && missingPreset) {
+          renderImportResults(resultsContainer, {
+            found: [],
+            missing: [],
+            errors: ["Attendee collection requires at least one attendee question preset."],
+            summary: "events created.",
+          });
+          return;
+        }
+        if (missingPreset) {
+          renderImportResults(resultsContainer, {
+            found: [],
+            missing: [],
+            errors: ["Select an attendee question preset for tickets with attendee collection enabled."],
+            summary: "events created.",
+          });
+          return;
+        }
         const requiresRange = payload.scheduleMode !== "specific";
         const hasSpecificDates = Array.isArray(payload.specificDates) && payload.specificDates.length > 0;
         if (!payload.eventName || (requiresRange && (!payload.startDate || !payload.endDate)) || (!requiresRange && !hasSpecificDates)) {
@@ -2397,6 +2679,7 @@
   };
 
   document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll("[data-tec-recurring-bookings]").forEach(initForm);
+  document.querySelectorAll("[data-tec-recurring-bookings]").forEach(initForm);
+  document.querySelectorAll("[data-tec-tags-picker]").forEach(initTagsPicker);
   });
 })();
